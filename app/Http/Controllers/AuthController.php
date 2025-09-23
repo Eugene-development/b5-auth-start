@@ -86,6 +86,16 @@ class AuthController extends Controller
                 'password' => Hash::make($request->password),
             ]);
 
+            // Send email verification notification after user is saved
+            try {
+                $user->sendEmailVerificationNotification();
+            } catch (\Exception $e) {
+                \Log::error('Failed to send email verification', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
             // Automatically log in the new user
             Auth::login($user);
             $request->session()->regenerate();
@@ -93,7 +103,7 @@ class AuthController extends Controller
             return response()->json([
                 'success' => true,
                 'user' => $user,
-                'message' => 'Registration successful'
+                'message' => 'Registration successful. Please check your email to verify your account.'
             ], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
             return response()->json([
