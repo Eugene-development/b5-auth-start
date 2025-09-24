@@ -26,7 +26,8 @@ return [
         'http://localhost:5040',
         'https://bonus5.ru',
         'https://admin.bonus.band',
-
+        'https://bonus.band',
+        'https://rubonus.info'
     ]),
 
     'allowed_origins_patterns' => [],
