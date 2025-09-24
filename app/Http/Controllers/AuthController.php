@@ -88,14 +88,14 @@ class AuthController extends Controller
 
             // FIXME: This is not working Регистрация работает, но письмо не отправляется на сервере, а локально нормально
             // Send email verification notification after user is saved
-            // try {
-            //     $user->sendEmailVerificationNotification();
-            // } catch (\Exception $e) {
-            //     \Log::error('Failed to send email verification', [
-            //         'user_id' => $user->id,
-            //         'error' => $e->getMessage()
-            //     ]);
-            // }
+            try {
+                $user->sendEmailVerificationNotification();
+            } catch (\Exception $e) {
+                \Log::error('Failed to send email verification', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
 
             // Automatically log in the new user
             Auth::login($user);
