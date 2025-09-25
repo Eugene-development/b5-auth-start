@@ -67,12 +67,12 @@ class AuthController extends Controller
      * Handle user registration
      *
      * Creates new user account and automatically logs them in
-     * Requirements: 1.1, 1.2, 1.3
      */
     public function register(Request $request)
     {
         try {
             // Validate registration data
+            // TODO: Validate city and phone
             $request->validate([
                 'name' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:users',
@@ -86,7 +86,6 @@ class AuthController extends Controller
                 'password' => Hash::make($request->password),
             ]);
 
-            // FIXME: This is not working Регистрация работает, но письмо не отправляется на сервере, а локально нормально
             // Send email verification notification after user is saved
             try {
                 $user->sendEmailVerificationNotification();
@@ -127,7 +126,6 @@ class AuthController extends Controller
      * Handle user logout
      *
      * Terminates user session and invalidates tokens
-     * Requirements: 3.1, 3.2, 3.3
      */
     public function logout(Request $request)
     {
