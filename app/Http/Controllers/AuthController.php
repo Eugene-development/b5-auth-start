@@ -90,14 +90,14 @@ class AuthController extends Controller
             ]);
 
             // Send email verification notification after user is saved
-            // try {
-            //     $user->sendEmailVerificationNotification();
-            // } catch (\Exception $e) {
-            //     \Log::error('Failed to send email verification', [
-            //         'user_id' => $user->id,
-            //         'error' => $e->getMessage()
-            //     ]);
-            // }
+            try {
+                $user->sendEmailVerificationNotification();
+            } catch (\Exception $e) {
+                \Log::error('Failed to send email verification', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
 
             // Automatically log in the new user
             Auth::login($user);
