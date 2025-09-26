@@ -72,11 +72,12 @@ class AuthController extends Controller
     {
         try {
             // Validate registration data
-            // TODO: Validate city and phone
             $request->validate([
                 'name' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:users',
                 'password' => 'required|string|min:8|confirmed',
+                'city' => 'nullable|string|max:255',
+                'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
             ]);
 
             // Create new user
@@ -84,17 +85,19 @@ class AuthController extends Controller
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
+                'city' => $request->city,
+                'phone' => $request->phone,
             ]);
 
             // Send email verification notification after user is saved
-            try {
-                $user->sendEmailVerificationNotification();
-            } catch (\Exception $e) {
-                \Log::error('Failed to send email verification', [
-                    'user_id' => $user->id,
-                    'error' => $e->getMessage()
-                ]);
-            }
+            // try {
+            //     $user->sendEmailVerificationNotification();
+            // } catch (\Exception $e) {
+            //     \Log::error('Failed to send email verification', [
+            //         'user_id' => $user->id,
+            //         'error' => $e->getMessage()
+            //     ]);
+            // }
 
             // Automatically log in the new user
             Auth::login($user);
