@@ -40,6 +40,15 @@ class User extends Authenticatable implements MustVerifyEmail
     ];
 
     /**
+     * The attributes that should be appended to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = [
+        'email_verified',
+    ];
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -50,6 +59,16 @@ class User extends Authenticatable implements MustVerifyEmail
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Get email verification status as boolean.
+     *
+     * @return bool
+     */
+    public function getEmailVerifiedAttribute(): bool
+    {
+        return !is_null($this->email_verified_at);
     }
 
     /**

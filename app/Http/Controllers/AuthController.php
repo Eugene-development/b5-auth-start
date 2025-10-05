@@ -238,9 +238,29 @@ class AuthController extends Controller
     public function verifyEmail(Request $request, $id, $hash)
     {
         try {
-            $user = User::findOrFail($id);
+            \Log::info('Email verification started', [
+                'id' => $id,
+                'hash' => $hash,
+                'request_all' => $request->all()
+            ]);
 
-            if (!hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            $user = User::findOrFail($id);
+            
+            \Log::info('User found for verification', [
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'current_email_verified_at' => $user->email_verified_at
+            ]);
+
+            $expectedHash = sha1($user->getEmailForVerification());
+            \Log::info('Hash comparison', [
+                'provided_hash' => $hash,
+                'expected_hash' => $expectedHash,
+                'match' => hash_equals((string) $hash, $expectedHash)
+            ]);
+
+            if (!hash_equals((string) $hash, $expectedHash)) {
+                \Log::warning('Email verification failed: hash mismatch');
                 return response()->json([
                     'success' => false,
                     'message' => 'Недействительная ссылка для подтверждения.'
@@ -248,6 +268,7 @@ class AuthController extends Controller
             }
 
             if ($user->hasVerifiedEmail()) {
+                \Log::info('Email already verified');
                 return response()->json([
                     'success' => true,
                     'message' => 'Email уже был подтвержден ранее.',
@@ -257,18 +278,45 @@ class AuthController extends Controller
                 ]);
             }
 
-            if ($user->markEmailAsVerified()) {
+            \Log::info('Marking email as verified');
+            $markResult = $user->markEmailAsVerified();
+            \Log::info('Mark email as verified result', [
+                'result' => $markResult,
+                'new_email_verified_at' => $user->fresh()->email_verified_at
+            ]);
+
+            if ($markResult) {
                 event(new \Illuminate\Auth\Events\Verified($user));
+                \Log::info('Verified event dispatched');
             }
+
+            $freshUser = $user->fresh();
+            \Log::info('Email verification completed successfully', [
+                'user_id' => $freshUser->id,
+                'email_verified_at' => $freshUser->email_verified_at
+            ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Email успешно подтвержден.',
                 'data' => [
-                    'user' => $user
+                    'user' => $freshUser
                 ]
             ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            \Log::error('Email verification failed: user not found', [
+                'id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Пользователь не найден.'
+            ], Response::HTTP_NOT_FOUND);
         } catch (Exception $e) {
+            \Log::error('Email verification error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during email verification.',
