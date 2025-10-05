@@ -21,6 +21,11 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         try {
+            \Log::info('Login attempt', [
+                'email' => $request->input('email'),
+                'has_password' => $request->has('password')
+            ]);
+
             // Validate input data
             $request->validate([
                 'email' => 'required|email',
@@ -29,6 +34,9 @@ class AuthController extends Controller
 
             // Attempt authentication
             if (!Auth::attempt($request->only('email', 'password'))) {
+                \Log::warning('Login failed - invalid credentials', [
+                    'email' => $request->input('email')
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'The provided credentials are incorrect.',
@@ -41,9 +49,17 @@ class AuthController extends Controller
             // Regenerate session for security
             $request->session()->regenerate();
 
+            $user = $request->user();
+            \Log::info('Login successful', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'email_verified_at' => $user->email_verified_at,
+                'email_verified' => $user->email_verified
+            ]);
+
             return response()->json([
                 'success' => true,
-                'user' => $request->user(),
+                'user' => $user,
                 'message' => 'Login successful'
             ]);
         } catch (ValidationException $e) {
