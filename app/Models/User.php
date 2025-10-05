@@ -25,8 +25,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'name',
         'email',
         'password',
-        'city',
-        'phone',
+        'region',
     ];
 
     /**
@@ -65,6 +64,14 @@ class User extends Authenticatable implements MustVerifyEmail
                 $user->key = Str::ulid();
             }
         });
+    }
+
+    /**
+     * Get the user's phones.
+     */
+    public function phones()
+    {
+        return $this->hasMany(UserPhone::class);
     }
 
     /**

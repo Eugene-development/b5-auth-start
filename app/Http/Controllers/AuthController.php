@@ -76,7 +76,7 @@ class AuthController extends Controller
                 'name' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:users',
                 'password' => 'required|string|min:8|confirmed',
-                'city' => 'nullable|string|max:255',
+                'region' => 'nullable|string|max:255',
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
             ]);
 
@@ -85,9 +85,16 @@ class AuthController extends Controller
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
-                'city' => $request->city,
-                'phone' => $request->phone,
+                'region' => $request->region,
             ]);
+
+            // Create user phone if provided
+            if ($request->filled('phone')) {
+                $user->phones()->create([
+                    'value' => $request->phone,
+                    'is_primary' => true,
+                ]);
+            }
 
             // Send email verification notification after user is saved
             try {
