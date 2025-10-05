@@ -80,12 +80,16 @@ class AuthController extends Controller
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
             ]);
 
+            // Get registration domain from Origin or Referer header
+            $registrationDomain = $this->getRegistrationDomain($request);
+
             // Create new user
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'region' => $request->region,
+                'registration_domain' => $registrationDomain,
             ]);
 
             // Create user phone if provided
@@ -273,5 +277,33 @@ class AuthController extends Controller
                 ]
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Extract registration domain from request headers.
+     */
+    private function getRegistrationDomain(Request $request): ?string
+    {
+        // Try to get domain from Origin header first
+        $origin = $request->header('Origin');
+        if ($origin) {
+            return $origin;
+        }
+
+        // Fallback to Referer header
+        $referer = $request->header('Referer');
+        if ($referer) {
+            $parsedUrl = parse_url($referer);
+            if (isset($parsedUrl['scheme']) && isset($parsedUrl['host'])) {
+                $domain = $parsedUrl['scheme'] . '://' . $parsedUrl['host'];
+                if (isset($parsedUrl['port']) && !in_array($parsedUrl['port'], [80, 443])) {
+                    $domain .= ':' . $parsedUrl['port'];
+                }
+                return $domain;
+            }
+        }
+
+        // Fallback to FRONTEND_URL from env
+        return env('FRONTEND_URL', 'http://localhost:5040');
     }
 }

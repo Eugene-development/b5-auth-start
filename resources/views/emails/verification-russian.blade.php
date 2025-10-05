@@ -103,7 +103,7 @@
                                             Добро пожаловать!
                                         </h2>
                                         <p style="margin: 16px 0 0 0; font-size: 16px; color: #d1d5db; line-height: 1.7;">
-                                            Спасибо за регистрацию в BONUS5
+                                            Спасибо за регистрацию
                                         </p>
                                     </td>
                                 </tr>
@@ -155,14 +155,13 @@
                             </table>
 
                             <!-- Features Section -->
-                            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 40px;">
+                            {{-- <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 40px;">
                                 <tr>
                                     <td>
                                         <h3 style="margin: 0 0 24px 0; font-size: 20px; font-weight: 600; color: #ffffff; text-align: center; letter-spacing: 1px;">
                                             Что вас ждет в BONUS5:
                                         </h3>
 
-                                        <!-- Feature Items -->
                                         <table width="100%" cellpadding="0" cellspacing="0" border="0">
                                             <tr>
                                                 <td style="padding: 16px 0;">
@@ -233,7 +232,7 @@
                                         </table>
                                     </td>
                                 </tr>
-                            </table>
+                            </table> --}}
                         </td>
                     </tr>
 
@@ -244,11 +243,11 @@
                                 <tr>
                                     <td style="text-align: center;">
                                         <p style="margin: 0 0 16px 0; font-size: 14px; color: #9ca3af; line-height: 1.6;">
-                                            Если вы не регистрировались на нашем сайте, то просто проигнорируйте это письмо.
+                                            Если вы не регистрировались на нашем сайте, то просто проигнорируйте это электронное письмо.
                                         </p>
                                         <p style="margin: 0; font-size: 14px; color: #6b7280; line-height: 1.6;">
                                             С уважением,<br>
-                                            <strong style="color: #ffffff; letter-spacing: 2px;">Команда BONUS5</strong>
+                                            <strong style="color: #ffffff; letter-spacing: 2px;">Команда BONUS 5</strong>
                                         </p>
                                     </td>
                                 </tr>

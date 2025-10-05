@@ -16,8 +16,11 @@ class CustomVerifyEmailNotification extends VerifyEmail
         $id = $notifiable->getKey();
         $hash = sha1($notifiable->getEmailForVerification());
 
+        // Use registration domain if available, otherwise fallback to FRONTEND_URL
+        $baseUrl = $notifiable->registration_domain ?? env('FRONTEND_URL', 'http://localhost:5040');
+
         // Build frontend URL with simple parameters
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:5040') . '/email-verify?' . http_build_query([
+        $frontendUrl = $baseUrl . '/email-verify?' . http_build_query([
             'id' => $id,
             'hash' => $hash
         ]);
