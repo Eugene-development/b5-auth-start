@@ -87,6 +87,16 @@ class AuthController extends Controller
     public function register(Request $request)
     {
         try {
+            \Log::info('Registration attempt', [
+                'name' => $request->input('name'),
+                'email' => $request->input('email'),
+                'has_password' => $request->has('password'),
+                'has_password_confirmation' => $request->has('password_confirmation'),
+                'region' => $request->input('region'),
+                'phone' => $request->input('phone'),
+                'all_keys' => array_keys($request->all())
+            ]);
+
             // Validate registration data
             $request->validate([
                 'name' => 'required|string|max:255',
@@ -99,6 +109,14 @@ class AuthController extends Controller
             // Get registration domain from Origin or Referer header
             $registrationDomain = $this->getRegistrationDomain($request);
 
+            // Determine status_id based on registration domain
+            $statusId = $this->getStatusIdByDomain($registrationDomain);
+
+            \Log::info('Creating user with status', [
+                'registration_domain' => $registrationDomain,
+                'status_id' => $statusId
+            ]);
+
             // Create new user
             $user = User::create([
                 'name' => $request->name,
@@ -106,6 +124,7 @@ class AuthController extends Controller
                 'password' => Hash::make($request->password),
                 'region' => $request->region,
                 'registration_domain' => $registrationDomain,
+                'status_id' => $statusId,
             ]);
 
             // Create user phone if provided
@@ -130,18 +149,30 @@ class AuthController extends Controller
             Auth::login($user);
             $request->session()->regenerate();
 
+            \Log::info('Registration successful', [
+                'user_id' => $user->id,
+                'email' => $user->email
+            ]);
+
             return response()->json([
                 'success' => true,
                 'user' => $user,
                 'message' => 'Registration successful. Please check your email to verify your account.'
             ], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
+            \Log::warning('Registration validation failed', [
+                'errors' => $e->errors()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'The given data was invalid.',
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
+            \Log::error('Registration error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during registration.',
@@ -261,7 +292,7 @@ class AuthController extends Controller
             ]);
 
             $user = User::findOrFail($id);
-            
+
             \Log::info('User found for verification', [
                 'user_id' => $user->id,
                 'user_email' => $user->email,
@@ -369,5 +400,69 @@ class AuthController extends Controller
 
         // Fallback to FRONTEND_URL from env
         return env('FRONTEND_URL', 'http://localhost:5040');
+    }
+
+    /**
+     * Determine user status_id based on registration domain.
+     *
+     * Domain mapping:
+     * - admin.bonus.band -> Админ
+     * - bonus.band -> Куратор
+     * - rubonus.info -> Менеджер
+     * - bonus5.ru -> Агент
+     * - all others -> Не определено (default)
+     */
+    private function getStatusIdByDomain(?string $registrationDomain): string
+    {
+        if (!$registrationDomain) {
+            return $this->getDefaultStatusId();
+        }
+
+        // Extract host from full URL
+        $parsedUrl = parse_url($registrationDomain);
+        $host = $parsedUrl['host'] ?? $registrationDomain;
+
+        // Map domains to status slugs
+        $domainStatusMap = [
+            'admin.bonus.band' => 'admin',
+            'bonus.band' => 'curators',
+            'rubonus.info' => 'manager',
+            'bonus5.ru' => 'agents',
+        ];
+
+        // Check if domain matches any known domain
+        $statusSlug = $domainStatusMap[$host] ?? null;
+
+        if ($statusSlug) {
+            // Get status_id by slug
+            $status = \DB::table('user_statuses')
+                ->where('slug', $statusSlug)
+                ->where('is_active', true)
+                ->first();
+
+            if ($status) {
+                return $status->id;
+            }
+        }
+
+        // Return default status if no match found
+        return $this->getDefaultStatusId();
+    }
+
+    /**
+     * Get default status_id (Не определено).
+     */
+    private function getDefaultStatusId(): string
+    {
+        $defaultStatus = \DB::table('user_statuses')
+            ->where('is_default', true)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$defaultStatus) {
+            throw new \Exception('Default user status not found in database');
+        }
+
+        return $defaultStatus->id;
     }
 }
