@@ -47,6 +47,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     protected $appends = [
         'email_verified',
+        'type',
     ];
 
     /**
@@ -73,6 +74,16 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
+     * Get user type from status relationship.
+     *
+     * @return string|null
+     */
+    public function getTypeAttribute(): ?string
+    {
+        return $this->status?->value;
+    }
+
+    /**
      * Boot the model and add event listeners.
      */
     protected static function boot()
@@ -93,6 +104,14 @@ class User extends Authenticatable implements MustVerifyEmail
     public function phones()
     {
         return $this->hasMany(UserPhone::class);
+    }
+
+    /**
+     * Get the status that the user belongs to.
+     */
+    public function status()
+    {
+        return $this->belongsTo(UserStatus::class, 'status_id');
     }
 
     /**
