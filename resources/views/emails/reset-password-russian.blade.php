@@ -139,7 +139,7 @@
                                             <tr>
                                                 <td style="background: rgba(251, 191, 36, 0.1); border-left: 3px solid #fbbf24; padding: 16px; border-radius: 8px;">
                                                     <p style="margin: 0; font-size: 14px; color: #fbbf24; line-height: 1.6;">
-                                                        <strong>⏱️ Важно:</strong> Ссылка для сброса пароля истечет через 60 минут
+                                                        <strong>⏱️ Важно:</strong> Ссылка для сброса пароля истечёт через 1 час
                                                     </p>
                                                 </td>
                                             </tr>
