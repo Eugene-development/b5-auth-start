@@ -14,6 +14,12 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
 
+        // Use custom CSRF token verification middleware
+        $middleware->validateCsrfTokens(except: [
+            'api/forgot-password',
+            'api/reset-password',
+        ]);
+
         // Enable CORS for all routes
         $middleware->web(prepend: [
             \Illuminate\Http\Middleware\HandleCors::class,

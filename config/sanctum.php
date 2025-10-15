@@ -17,7 +17,7 @@ return [
 
     'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
         '%s%s%s',
-        'localhost,localhost:3000,localhost:5173,127.0.0.1,127.0.0.1:8000,127.0.0.1:5173,::1',
+        'localhost,localhost:3000,localhost:5040,localhost:5173,127.0.0.1,127.0.0.1:8000,127.0.0.1:5040,127.0.0.1:5173,::1',
         Sanctum::currentApplicationUrlWithPort() ? ',' . Sanctum::currentApplicationUrlWithPort() : '',
         // Add frontend URL from environment
         env('FRONTEND_URL') ? ',' . parse_url(env('FRONTEND_URL'), PHP_URL_HOST) . ':' . parse_url(env('FRONTEND_URL'), PHP_URL_PORT) : ''
