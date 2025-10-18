@@ -60,8 +60,6 @@ class AuthController extends Controller
             $request->session()->regenerate();
 
             $user = $request->user();
-            // Load status relationship to include type in response
-            $user->load('status');
 
             Log::info('Login successful', [
                 'user_id' => $user->id,
@@ -164,9 +162,6 @@ class AuthController extends Controller
             Auth::login($user);
             $request->session()->regenerate();
 
-            // Load status relationship to include type in response
-            $user->load('status');
-
             Log::info('Registration successful', [
                 'user_id' => $user->id,
                 'email' => $user->email,
@@ -251,9 +246,6 @@ class AuthController extends Controller
                     ]
                 ], Response::HTTP_UNAUTHORIZED);
             }
-
-            // Load status relationship to include type in response
-            $user->load('status');
 
             return response()->json([
                 'success' => true,
