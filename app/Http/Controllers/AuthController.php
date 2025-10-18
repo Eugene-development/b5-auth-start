@@ -7,7 +7,9 @@ use App\Notifications\ResetPasswordNotification;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -24,20 +26,25 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         try {
-            \Log::info('Login attempt', [
+            Log::info('Login attempt', [
                 'email' => $request->input('email'),
-                'has_password' => $request->has('password')
+                'has_password' => $request->has('password'),
+                'remember' => $request->input('remember', false)
             ]);
 
             // Validate input data
             $request->validate([
                 'email' => 'required|email',
                 'password' => 'required|string',
+                'remember' => 'nullable|boolean',
             ]);
 
-            // Attempt authentication
-            if (!Auth::attempt($request->only('email', 'password'))) {
-                \Log::warning('Login failed - invalid credentials', [
+            // Get remember preference (default to false)
+            $remember = $request->input('remember', false);
+
+            // Attempt authentication with remember option
+            if (!Auth::attempt($request->only('email', 'password'), $remember)) {
+                Log::warning('Login failed - invalid credentials', [
                     'email' => $request->input('email')
                 ]);
                 return response()->json([
@@ -56,7 +63,7 @@ class AuthController extends Controller
             // Load status relationship to include type in response
             $user->load('status');
 
-            \Log::info('Login successful', [
+            Log::info('Login successful', [
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'email_verified_at' => $user->email_verified_at,
@@ -95,7 +102,7 @@ class AuthController extends Controller
     public function register(Request $request)
     {
         try {
-            \Log::info('Registration attempt', [
+            Log::info('Registration attempt', [
                 'name' => $request->input('name'),
                 'email' => $request->input('email'),
                 'has_password' => $request->has('password'),
@@ -120,7 +127,7 @@ class AuthController extends Controller
             // Determine status_id based on registration domain
             $statusId = $this->getStatusIdByDomain($registrationDomain);
 
-            \Log::info('Creating user with status', [
+            Log::info('Creating user with status', [
                 'registration_domain' => $registrationDomain,
                 'status_id' => $statusId
             ]);
@@ -147,7 +154,7 @@ class AuthController extends Controller
             try {
                 $user->sendEmailVerificationNotification();
             } catch (\Exception $e) {
-                \Log::error('Failed to send email verification', [
+                Log::error('Failed to send email verification', [
                     'user_id' => $user->id,
                     'error' => $e->getMessage()
                 ]);
@@ -160,7 +167,7 @@ class AuthController extends Controller
             // Load status relationship to include type in response
             $user->load('status');
 
-            \Log::info('Registration successful', [
+            Log::info('Registration successful', [
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'status_id' => $user->status_id,
@@ -173,7 +180,7 @@ class AuthController extends Controller
                 'message' => 'Registration successful. Please check your email to verify your account.'
             ], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
-            \Log::warning('Registration validation failed', [
+            Log::warning('Registration validation failed', [
                 'errors' => $e->errors()
             ]);
             return response()->json([
@@ -182,7 +189,7 @@ class AuthController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
-            \Log::error('Registration error', [
+            Log::error('Registration error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -301,7 +308,7 @@ class AuthController extends Controller
     public function verifyEmail(Request $request, $id, $hash)
     {
         try {
-            \Log::info('Email verification started', [
+            Log::info('Email verification started', [
                 'id' => $id,
                 'hash' => $hash,
                 'request_all' => $request->all()
@@ -309,21 +316,21 @@ class AuthController extends Controller
 
             $user = User::findOrFail($id);
 
-            \Log::info('User found for verification', [
+            Log::info('User found for verification', [
                 'user_id' => $user->id,
                 'user_email' => $user->email,
                 'current_email_verified_at' => $user->email_verified_at
             ]);
 
             $expectedHash = sha1($user->getEmailForVerification());
-            \Log::info('Hash comparison', [
+            Log::info('Hash comparison', [
                 'provided_hash' => $hash,
                 'expected_hash' => $expectedHash,
                 'match' => hash_equals((string) $hash, $expectedHash)
             ]);
 
             if (!hash_equals((string) $hash, $expectedHash)) {
-                \Log::warning('Email verification failed: hash mismatch');
+                Log::warning('Email verification failed: hash mismatch');
                 return response()->json([
                     'success' => false,
                     'message' => 'Недействительная ссылка для подтверждения.'
@@ -331,7 +338,7 @@ class AuthController extends Controller
             }
 
             if ($user->hasVerifiedEmail()) {
-                \Log::info('Email already verified');
+                Log::info('Email already verified');
                 return response()->json([
                     'success' => true,
                     'message' => 'Email уже был подтвержден ранее.',
@@ -341,20 +348,20 @@ class AuthController extends Controller
                 ]);
             }
 
-            \Log::info('Marking email as verified');
+            Log::info('Marking email as verified');
             $markResult = $user->markEmailAsVerified();
-            \Log::info('Mark email as verified result', [
+            Log::info('Mark email as verified result', [
                 'result' => $markResult,
                 'new_email_verified_at' => $user->fresh()->email_verified_at
             ]);
 
             if ($markResult) {
                 event(new \Illuminate\Auth\Events\Verified($user));
-                \Log::info('Verified event dispatched');
+                Log::info('Verified event dispatched');
             }
 
             $freshUser = $user->fresh();
-            \Log::info('Email verification completed successfully', [
+            Log::info('Email verification completed successfully', [
                 'user_id' => $freshUser->id,
                 'email_verified_at' => $freshUser->email_verified_at
             ]);
@@ -367,7 +374,7 @@ class AuthController extends Controller
                 ]
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            \Log::error('Email verification failed: user not found', [
+            Log::error('Email verification failed: user not found', [
                 'id' => $id,
                 'error' => $e->getMessage()
             ]);
@@ -376,7 +383,7 @@ class AuthController extends Controller
                 'message' => 'Пользователь не найден.'
             ], Response::HTTP_NOT_FOUND);
         } catch (Exception $e) {
-            \Log::error('Email verification error', [
+            Log::error('Email verification error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -451,7 +458,7 @@ class AuthController extends Controller
 
         if ($statusSlug) {
             // Get status_id by slug
-            $status = \DB::table('user_statuses')
+            $status = DB::table('user_statuses')
                 ->where('slug', $statusSlug)
                 ->where('is_active', true)
                 ->first();
@@ -470,7 +477,7 @@ class AuthController extends Controller
      */
     private function getDefaultStatusId(): string
     {
-        $defaultStatus = \DB::table('user_statuses')
+        $defaultStatus = DB::table('user_statuses')
             ->where('is_default', true)
             ->where('is_active', true)
             ->first();
@@ -488,7 +495,7 @@ class AuthController extends Controller
     public function forgotPassword(Request $request)
     {
         try {
-            \Log::info('Password reset request', [
+            Log::info('Password reset request', [
                 'email' => $request->input('email')
             ]);
 
@@ -499,7 +506,7 @@ class AuthController extends Controller
             $user = User::where('email', $request->email)->first();
 
             if (!$user) {
-                \Log::warning('Password reset requested for non-existent email', [
+                Log::warning('Password reset requested for non-existent email', [
                     'email' => $request->email
                 ]);
                 // Return success even if user doesn't exist (security best practice)
@@ -510,7 +517,7 @@ class AuthController extends Controller
             }
 
             // Delete old tokens for this email
-            \DB::table('password_reset_tokens')
+            DB::table('password_reset_tokens')
                 ->where('email', $request->email)
                 ->delete();
 
@@ -518,7 +525,7 @@ class AuthController extends Controller
             $token = Str::random(64);
 
             // Store token in database
-            \DB::table('password_reset_tokens')->insert([
+            DB::table('password__reset_tokens')->insert([
                 'email' => $request->email,
                 'token' => Hash::make($token),
                 'created_at' => now()
@@ -527,7 +534,7 @@ class AuthController extends Controller
             // Send notification
             $user->notify(new ResetPasswordNotification($token, $request->email));
 
-            \Log::info('Password reset email sent', [
+            Log::info('Password reset email sent', [
                 'email' => $request->email
             ]);
 
@@ -542,7 +549,7 @@ class AuthController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
-            \Log::error('Password reset error', [
+            Log::error('Password reset error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -562,7 +569,7 @@ class AuthController extends Controller
     public function resetPassword(Request $request)
     {
         try {
-            \Log::info('Password reset attempt', [
+            Log::info('Password reset attempt', [
                 'email' => $request->input('email'),
                 'has_token' => $request->has('token')
             ]);
@@ -574,12 +581,12 @@ class AuthController extends Controller
             ]);
 
             // Find token record
-            $tokenRecord = \DB::table('password_reset_tokens')
+            $tokenRecord = DB::table('password_reset_tokens')
                 ->where('email', $request->email)
                 ->first();
 
             if (!$tokenRecord) {
-                \Log::warning('Password reset failed: token not found', [
+                Log::warning('Password reset failed: token not found', [
                     'email' => $request->email
                 ]);
                 return response()->json([
@@ -594,13 +601,13 @@ class AuthController extends Controller
             // Check if token is expired (60 minutes)
             $createdAt = \Carbon\Carbon::parse($tokenRecord->created_at);
             if ($createdAt->addMinutes(60)->isPast()) {
-                \Log::warning('Password reset failed: token expired', [
+                Log::warning('Password reset failed: token expired', [
                     'email' => $request->email,
                     'created_at' => $tokenRecord->created_at
                 ]);
 
                 // Delete expired token
-                \DB::table('password_reset_tokens')
+                DB::table('password_reset_tokens')
                     ->where('email', $request->email)
                     ->delete();
 
@@ -615,7 +622,7 @@ class AuthController extends Controller
 
             // Verify token
             if (!Hash::check($request->token, $tokenRecord->token)) {
-                \Log::warning('Password reset failed: invalid token', [
+                Log::warning('Password reset failed: invalid token', [
                     'email' => $request->email
                 ]);
                 return response()->json([
@@ -631,7 +638,7 @@ class AuthController extends Controller
             $user = User::where('email', $request->email)->first();
 
             if (!$user) {
-                \Log::warning('Password reset failed: user not found', [
+                Log::warning('Password reset failed: user not found', [
                     'email' => $request->email
                 ]);
                 return response()->json([
@@ -648,11 +655,11 @@ class AuthController extends Controller
             $user->save();
 
             // Delete token after successful reset
-            \DB::table('password_reset_tokens')
+            DB::table('password_reset_tokens')
                 ->where('email', $request->email)
                 ->delete();
 
-            \Log::info('Password reset successful', [
+            Log::info('Password reset successful', [
                 'user_id' => $user->id,
                 'email' => $user->email
             ]);
@@ -668,7 +675,7 @@ class AuthController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
-            \Log::error('Password reset error', [
+            Log::error('Password reset error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
