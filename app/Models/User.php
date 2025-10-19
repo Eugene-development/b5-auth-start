@@ -48,6 +48,7 @@ class User extends Authenticatable implements MustVerifyEmail
     protected $appends = [
         'email_verified',
         'type',
+        'phone',
     ];
 
     /**
@@ -57,6 +58,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     protected $with = [
         'status',
+        'phones',
     ];
 
     /**
@@ -90,6 +92,17 @@ class User extends Authenticatable implements MustVerifyEmail
     public function getTypeAttribute(): ?string
     {
         return $this->status?->value;
+    }
+
+    /**
+     * Get primary phone number.
+     *
+     * @return string|null
+     */
+    public function getPhoneAttribute(): ?string
+    {
+        $primaryPhone = $this->phones->where('is_primary', true)->first();
+        return $primaryPhone?->value ?? $this->phones->first()?->value;
     }
 
     /**
