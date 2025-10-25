@@ -26,9 +26,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         // Enable sessions and CORS for API routes
+        // Use custom StartSessionIfExists to prevent creating new sessions
         $middleware->api(prepend: [
             \Illuminate\Http\Middleware\HandleCors::class,
-            \Illuminate\Session\Middleware\StartSession::class,
+            \App\Http\Middleware\StartSessionIfExists::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
