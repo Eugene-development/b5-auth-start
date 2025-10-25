@@ -12,11 +12,20 @@ class StartSessionIfExists extends StartSession
     /**
      * Handle an incoming request.
      *
-     * Only start session if session cookie OR remember cookie already exists.
-     * This prevents creating new sessions on every API request.
+     * Only start session if:
+     * - Session cookie already exists, OR
+     * - Remember cookie exists, OR
+     * - It's a POST/PUT/PATCH/DELETE request (mutations that need session)
+     *
+     * This prevents creating new sessions on GET requests without cookies.
      */
     public function handle($request, Closure $next): Response
     {
+        // Always start session for mutation requests (login, register, etc.)
+        if (in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'])) {
+            return parent::handle($request, $next);
+        }
+
         // Get session cookie name
         $sessionName = $this->manager->getSessionConfig()['cookie'] ?? config('session.cookie');
 
@@ -27,7 +36,7 @@ class StartSessionIfExists extends StartSession
         $hasSessionCookie = $request->cookies->has($sessionName);
         $hasRememberCookie = $request->cookies->has($rememberCookieName);
 
-        // If neither session nor remember cookie exists, skip session handling
+        // If neither session nor remember cookie exists, skip session handling for GET requests
         if (!$hasSessionCookie && !$hasRememberCookie) {
             return $next($request);
         }

@@ -60,6 +60,9 @@ return [
             'options' => extension_loaded('pdo_mysql') ? [
                 PDO::MYSQL_ATTR_SSL_CA => '/run/secrets/db_ssl_ca',
                 PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false,
+                PDO::ATTR_TIMEOUT => 5, // Таймаут подключения 5 секунд
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION wait_timeout=28800",
             ] : [],
             // 'options' => extension_loaded('pdo_mysql') ? array_filter([
             //     PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
