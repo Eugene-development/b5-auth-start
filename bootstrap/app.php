@@ -12,12 +12,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->statefulApi();
+        // Disable statefulApi - we're using JWT now, not Sanctum sessions
+        // $middleware->statefulApi();
 
-        // Use custom CSRF token verification middleware
+        // Exclude all API routes from CSRF verification - using JWT instead
         $middleware->validateCsrfTokens(except: [
-            'api/forgot-password',
-            'api/reset-password',
+            'api/*',
         ]);
 
         // Enable CORS for all routes
@@ -25,11 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Http\Middleware\HandleCors::class,
         ]);
 
-        // Enable sessions and CORS for API routes
-        // Use custom StartSessionIfExists to prevent creating new sessions
+        // Enable CORS for API routes (sessions removed - not needed for JWT)
         $middleware->api(prepend: [
             \Illuminate\Http\Middleware\HandleCors::class,
-            \App\Http\Middleware\StartSessionIfExists::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

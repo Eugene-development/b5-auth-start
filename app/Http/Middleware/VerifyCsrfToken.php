@@ -12,9 +12,8 @@ class VerifyCsrfToken extends Middleware
      * @var array<int, string>
      */
     protected $except = [
-        // Password reset routes don't need CSRF protection
-        // as they use tokens for verification
-        'api/forgot-password',
-        'api/reset-password',
+        // All API routes are excluded from CSRF verification
+        // JWT tokens are used for authentication instead
+        'api/*',
     ];
 }

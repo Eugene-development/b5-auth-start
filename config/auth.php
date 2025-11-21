@@ -45,6 +45,12 @@ return [
             'driver' => 'sanctum',
             'provider' => null,
         ],
+
+        'api' => [
+            'driver' => 'jwt',
+            'provider' => 'users',
+            'hash' => false,
+        ],
     ],
 
     /*

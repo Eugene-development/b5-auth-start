@@ -13,6 +13,32 @@ echo "🔑 Generating APP_KEY..."
 export APP_KEY=$(php artisan key:generate --show 2>/dev/null || echo "base64:"$(openssl rand -base64 32))
 echo "✅ APP_KEY: $APP_KEY"
 
+echo "🔑 Generating JWT_SECRET..."
+if [ -f "/run/secrets/jwt_secret" ]; then
+    JWT_SECRET=$(cat /run/secrets/jwt_secret)
+    echo "✅ JWT_SECRET loaded from secret"
+else
+    JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+    echo "✅ JWT_SECRET generated"
+fi
+export JWT_SECRET
+
+# Write JWT_SECRET to .env file so PHP-FPM can access it
+if [ -f "/var/www/.env" ]; then
+    # Remove existing JWT_SECRET line if present
+    sed -i '/^JWT_SECRET=/d' /var/www/.env
+    # Add new JWT_SECRET
+    echo "JWT_SECRET=${JWT_SECRET}" >> /var/www/.env
+    echo "✅ JWT_SECRET written to .env"
+fi
+
+# Publish JWT config if not exists
+if [ ! -f "/var/www/config/jwt.php" ]; then
+    echo "📝 Publishing JWT configuration..."
+    php artisan vendor:publish --provider="Tymon\JWTAuth\Providers\LaravelServiceProvider" 2>/dev/null || echo "⚠️  JWT config publish failed"
+    echo "✅ JWT configuration published"
+fi
+
 if [ -f "/run/secrets/app_url" ]; then
     export APP_URL=$(cat /run/secrets/app_url)
     echo "✅ APP_URL loaded from secret: $APP_URL"

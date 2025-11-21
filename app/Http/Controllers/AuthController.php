@@ -7,45 +7,41 @@ use App\Notifications\ResetPasswordNotification;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Exceptions\JWTException;
 use Exception;
 
 class AuthController extends Controller
 {
     /**
-     * Handle user login
+     * Handle user login with JWT
      *
-     * Validates user credentials and creates authenticated session
-     * Requirements: 2.1, 2.2, 2.3
+     * Validates user credentials and returns JWT token
      */
     public function login(Request $request)
     {
         try {
-            Log::info('Login attempt', [
+            Log::info('JWT Login attempt', [
                 'email' => $request->input('email'),
                 'has_password' => $request->has('password'),
-                'remember' => $request->input('remember', false)
             ]);
 
             // Validate input data
             $request->validate([
                 'email' => 'required|email',
                 'password' => 'required|string',
-                'remember' => 'nullable|boolean',
             ]);
 
-            // Get remember preference (default to false)
-            $remember = $request->input('remember', false);
+            $credentials = $request->only('email', 'password');
 
-            // Attempt authentication with remember option
-            if (!Auth::attempt($request->only('email', 'password'), $remember)) {
-                Log::warning('Login failed - invalid credentials', [
+            // Attempt to generate JWT token
+            if (!$token = JWTAuth::attempt($credentials)) {
+                Log::warning('JWT Login failed - invalid credentials', [
                     'email' => $request->input('email')
                 ]);
                 return response()->json([
@@ -57,16 +53,11 @@ class AuthController extends Controller
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
-            // Regenerate session for security
-            $request->session()->regenerate();
+            $user = Auth::user();
 
-            $user = $request->user();
-
-            Log::info('Login successful', [
+            Log::info('JWT Login successful', [
                 'user_id' => $user->id,
                 'email' => $user->email,
-                'email_verified_at' => $user->email_verified_at,
-                'email_verified' => $user->email_verified,
                 'status_id' => $user->status_id,
                 'type' => $user->type
             ]);
@@ -74,6 +65,9 @@ class AuthController extends Controller
             return response()->json([
                 'success' => true,
                 'user' => $user,
+                'token' => $token,
+                'token_type' => 'bearer',
+                'expires_in' => JWTAuth::factory()->getTTL() * 60, // in seconds
                 'message' => 'Login successful'
             ]);
         } catch (ValidationException $e) {
@@ -82,7 +76,17 @@ class AuthController extends Controller
                 'message' => 'The given data was invalid.',
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (JWTException $e) {
+            Log::error('JWT Token creation error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not create token.',
+                'errors' => [
+                    'general' => ['Authentication failed. Please try again.']
+                ]
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         } catch (Exception $e) {
+            Log::error('Login error', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during login.',
@@ -94,21 +98,18 @@ class AuthController extends Controller
     }
 
     /**
-     * Handle user registration
+     * Handle user registration with JWT
      *
-     * Creates new user account and automatically logs them in
+     * Creates new user account and returns JWT token
      */
     public function register(Request $request)
     {
         try {
-            Log::info('Registration attempt', [
+            Log::info('JWT Registration attempt', [
                 'name' => $request->input('name'),
                 'email' => $request->input('email'),
-                'has_password' => $request->has('password'),
-                'has_password_confirmation' => $request->has('password_confirmation'),
                 'region' => $request->input('region'),
                 'phone' => $request->input('phone'),
-                'all_keys' => array_keys($request->all())
             ]);
 
             // Validate registration data
@@ -149,7 +150,7 @@ class AuthController extends Controller
                 ]);
             }
 
-            // Send email verification notification after user is saved
+            // Send email verification notification
             try {
                 $user->sendEmailVerificationNotification();
             } catch (\Exception $e) {
@@ -159,11 +160,10 @@ class AuthController extends Controller
                 ]);
             }
 
-            // Automatically log in the new user
-            Auth::login($user);
-            $request->session()->regenerate();
+            // Generate JWT token for the new user
+            $token = JWTAuth::fromUser($user);
 
-            Log::info('Registration successful', [
+            Log::info('JWT Registration successful', [
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'status_id' => $user->status_id,
@@ -172,7 +172,10 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'user' => $user,
+                'user' => $user->fresh(), // Reload with relationships
+                'token' => $token,
+                'token_type' => 'bearer',
+                'expires_in' => JWTAuth::factory()->getTTL() * 60,
                 'message' => 'Registration successful. Please check your email to verify your account.'
             ], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
@@ -184,6 +187,15 @@ class AuthController extends Controller
                 'message' => 'The given data was invalid.',
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (JWTException $e) {
+            Log::error('JWT Token creation error after registration', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'User created but could not create token.',
+                'errors' => [
+                    'general' => ['Registration partially successful. Please try to log in.']
+                ]
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         } catch (Exception $e) {
             Log::error('Registration error', [
                 'error' => $e->getMessage(),
@@ -200,99 +212,36 @@ class AuthController extends Controller
     }
 
     /**
-     * Handle user logout
+     * Handle user logout (invalidate JWT token)
      *
-     * Terminates user session and invalidates tokens
+     * Invalidates the user's JWT token
      */
     public function logout(Request $request)
     {
         try {
             $user = Auth::user();
-            Log::info('Logout initiated', ['user_id' => $user?->id, 'email' => $user?->email]);
+            Log::info('JWT Logout initiated', ['user_id' => $user?->id, 'email' => $user?->email]);
 
-            // For Sanctum, use the web guard directly
-            Auth::guard('web')->logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
+            // Invalidate the token
+            JWTAuth::invalidate(JWTAuth::getToken());
 
-            Log::info('Session invalidated and token regenerated');
+            Log::info('JWT Logout completed successfully');
 
-            // Get cookie configuration
-            $sessionName = config('session.cookie', 'b5_auth_2_session');
-            $sessionDomain = config('session.domain');
-            $sessionPath = config('session.path', '/');
-
-            Log::info('Cookie config', [
-                'name' => $sessionName,
-                'domain' => $sessionDomain,
-                'path' => $sessionPath,
-                'request_host' => $request->getHost()
-            ]);
-
-            // For localhost, we need to explicitly NOT set domain
-            // For production, use the configured domain
-            $isLocalhost = in_array($request->getHost(), ['localhost', '127.0.0.1', '::1']);
-            $cookieDomain = $isLocalhost ? null : $sessionDomain;
-
-            Log::info('Cookie deletion params', [
-                'isLocalhost' => $isLocalhost,
-                'cookieDomain' => $cookieDomain
-            ]);
-
-            // Create response
-            $response = response()->json([
+            return response()->json([
                 'success' => true,
                 'message' => 'Logged out successfully'
             ]);
-
-            // Delete session cookie by setting it to expire in the past
-            $response->cookie(
-                $sessionName,
-                '',
-                -2628000, // Expire 5 years ago
-                $sessionPath,
-                $cookieDomain,
-                config('session.secure', false),
-                config('session.http_only', true),
-                false,
-                config('session.same_site', 'lax')
-            );
-
-            // Also delete XSRF token
-            $response->cookie(
-                'XSRF-TOKEN',
-                '',
-                -2628000,
-                $sessionPath,
-                $cookieDomain,
-                config('session.secure', false),
-                false, // XSRF token is not httpOnly
-                false,
-                config('session.same_site', 'lax')
-            );
-
-            // Delete remember_web cookie (used for "Remember Me" functionality)
-            // The cookie name is generated by Laravel: remember_web_{sha1('web')}
-            $rememberCookieName = 'remember_web_' . sha1('web');
-            $response->cookie(
-                $rememberCookieName,
-                '',
-                -2628000,
-                $sessionPath,
-                $cookieDomain,
-                config('session.secure', false),
-                true, // Remember cookie is httpOnly
-                false,
-                config('session.same_site', 'lax')
-            );
-
-            Log::info('Logout completed successfully, all cookies set to expire', [
-                'deleted_cookies' => [$sessionName, 'XSRF-TOKEN', $rememberCookieName]
-            ]);
-
-            return $response;
+        } catch (JWTException $e) {
+            Log::error('JWT Logout error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to logout, please try again.',
+                'errors' => [
+                    'general' => ['Failed to invalidate token.']
+                ]
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         } catch (Exception $e) {
-            Log::error('Logout error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            Log::error('Logout error', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during logout.',
@@ -304,15 +253,43 @@ class AuthController extends Controller
     }
 
     /**
+     * Refresh JWT token
+     *
+     * Returns a new JWT token
+     */
+    public function refresh(Request $request)
+    {
+        try {
+            $newToken = JWTAuth::refresh(JWTAuth::getToken());
+
+            return response()->json([
+                'success' => true,
+                'token' => $newToken,
+                'token_type' => 'bearer',
+                'expires_in' => JWTAuth::factory()->getTTL() * 60,
+                'message' => 'Token refreshed successfully'
+            ]);
+        } catch (JWTException $e) {
+            Log::error('JWT Refresh error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not refresh token.',
+                'errors' => [
+                    'general' => ['Token refresh failed. Please log in again.']
+                ]
+            ], Response::HTTP_UNAUTHORIZED);
+        }
+    }
+
+    /**
      * Get authenticated user data
      *
      * Returns current authenticated user information
-     * Requirements: 2.1, 4.1, 4.2
      */
     public function user(Request $request)
     {
         try {
-            $user = $request->user();
+            $user = Auth::user();
 
             if (!$user) {
                 return response()->json([
@@ -329,6 +306,7 @@ class AuthController extends Controller
                 'user' => $user
             ]);
         } catch (Exception $e) {
+            Log::error('Get user error', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while fetching user data.',
@@ -345,7 +323,7 @@ class AuthController extends Controller
     public function sendEmailVerification(Request $request)
     {
         try {
-            $user = $request->user();
+            $user = Auth::user();
 
             if ($user->hasVerifiedEmail()) {
                 return response()->json([
@@ -361,6 +339,7 @@ class AuthController extends Controller
                 'message' => 'Письмо с подтверждением отправлено.'
             ]);
         } catch (Exception $e) {
+            Log::error('Send verification email error', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while sending verification email.',
@@ -380,23 +359,11 @@ class AuthController extends Controller
             Log::info('Email verification started', [
                 'id' => $id,
                 'hash' => $hash,
-                'request_all' => $request->all()
             ]);
 
             $user = User::findOrFail($id);
 
-            Log::info('User found for verification', [
-                'user_id' => $user->id,
-                'user_email' => $user->email,
-                'current_email_verified_at' => $user->email_verified_at
-            ]);
-
             $expectedHash = sha1($user->getEmailForVerification());
-            Log::info('Hash comparison', [
-                'provided_hash' => $hash,
-                'expected_hash' => $expectedHash,
-                'match' => hash_equals((string) $hash, $expectedHash)
-            ]);
 
             if (!hash_equals((string) $hash, $expectedHash)) {
                 Log::warning('Email verification failed: hash mismatch');
@@ -417,45 +384,28 @@ class AuthController extends Controller
                 ]);
             }
 
-            Log::info('Marking email as verified');
-            $markResult = $user->markEmailAsVerified();
-            Log::info('Mark email as verified result', [
-                'result' => $markResult,
-                'new_email_verified_at' => $user->fresh()->email_verified_at
-            ]);
+            $user->markEmailAsVerified();
+            event(new \Illuminate\Auth\Events\Verified($user));
 
-            if ($markResult) {
-                event(new \Illuminate\Auth\Events\Verified($user));
-                Log::info('Verified event dispatched');
-            }
-
-            $freshUser = $user->fresh();
             Log::info('Email verification completed successfully', [
-                'user_id' => $freshUser->id,
-                'email_verified_at' => $freshUser->email_verified_at
+                'user_id' => $user->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Email успешно подтвержден.',
                 'data' => [
-                    'user' => $freshUser
+                    'user' => $user->fresh()
                 ]
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            Log::error('Email verification failed: user not found', [
-                'id' => $id,
-                'error' => $e->getMessage()
-            ]);
+            Log::error('Email verification failed: user not found', ['id' => $id]);
             return response()->json([
                 'success' => false,
                 'message' => 'Пользователь не найден.'
             ], Response::HTTP_NOT_FOUND);
         } catch (Exception $e) {
-            Log::error('Email verification error', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+            Log::error('Email verification error', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during email verification.',
@@ -518,7 +468,7 @@ class AuthController extends Controller
         $domainStatusMap = [
             'admin.bonus.band' => 'admin',
             'bonus.band' => 'curators',
-            'rubonus.info' => 'manager',
+            'rubonus.info' => 'managers',
             'bonus5.ru' => 'agents',
         ];
 
@@ -594,7 +544,7 @@ class AuthController extends Controller
             $token = Str::random(64);
 
             // Store token in database
-            DB::table('password__reset_tokens')->insert([
+            DB::table('password_reset_tokens')->insert([
                 'email' => $request->email,
                 'token' => Hash::make($token),
                 'created_at' => now()
@@ -620,7 +570,6 @@ class AuthController extends Controller
         } catch (Exception $e) {
             Log::error('Password reset error', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ]);
             return response()->json([
                 'success' => false,
@@ -672,7 +621,6 @@ class AuthController extends Controller
             if ($createdAt->addMinutes(60)->isPast()) {
                 Log::warning('Password reset failed: token expired', [
                     'email' => $request->email,
-                    'created_at' => $tokenRecord->created_at
                 ]);
 
                 // Delete expired token
@@ -746,7 +694,6 @@ class AuthController extends Controller
         } catch (Exception $e) {
             Log::error('Password reset error', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ]);
             return response()->json([
                 'success' => false,

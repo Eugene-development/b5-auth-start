@@ -3,18 +3,23 @@
 use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 
-// Authentication routes
+// Authentication routes (public)
 Route::post('/login', [AuthController::class, 'login'])->name('login');
 Route::post('/register', [AuthController::class, 'register'])->name('register');
 
-// Password reset routes
+// Password reset routes (public)
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])
     ->middleware('throttle:3,1'); // 3 attempts per minute
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
-// Protected routes
-Route::middleware('auth:sanctum')->group(function () {
+// Email verification route (no auth required)
+Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
+    ->name('custom.email.verify');
+
+// Protected routes (require JWT authentication)
+Route::middleware('auth:api')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/refresh', [AuthController::class, 'refresh']);
     Route::get('/user', [AuthController::class, 'user']);
 
     // Email verification routes
@@ -23,7 +28,3 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('throttle:6,1'); // 6 attempts per minute
     });
 });
-
-// Email verification route (no auth required)
-Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
-    ->name('custom.email.verify');
