@@ -17,7 +17,7 @@ Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     ->name('custom.email.verify');
 
 // Protected routes (require JWT authentication)
-Route::middleware('auth:api')->group(function () {
+Route::middleware(['auth.cookie', 'auth:api'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/refresh', [AuthController::class, 'refresh']);
     Route::get('/user', [AuthController::class, 'user']);

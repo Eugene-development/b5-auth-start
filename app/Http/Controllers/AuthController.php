@@ -62,14 +62,30 @@ class AuthController extends Controller
                 'type' => $user->type
             ]);
 
+            // Calculate TTL in minutes
+            $ttl = JWTAuth::factory()->getTTL();
+
+            // Create httpOnly cookie
+            $cookie = cookie(
+                'b5_auth_token',           // Cookie name
+                $token,                     // JWT token
+                $ttl,                       // Expiration time (minutes)
+                '/',                        // Path
+                config('session.domain'),   // Domain
+                config('app.env') === 'production', // Secure (HTTPS only in production)
+                true,                       // HttpOnly
+                false,                      // Raw
+                'lax'                       // SameSite
+            );
+
             return response()->json([
                 'success' => true,
                 'user' => $user,
                 'token' => $token,
                 'token_type' => 'bearer',
-                'expires_in' => JWTAuth::factory()->getTTL() * 60, // in seconds
+                'expires_in' => $ttl * 60, // in seconds
                 'message' => 'Login successful'
-            ]);
+            ])->cookie($cookie);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -170,14 +186,30 @@ class AuthController extends Controller
                 'type' => $user->type
             ]);
 
+            // Calculate TTL in minutes
+            $ttl = JWTAuth::factory()->getTTL();
+
+            // Create httpOnly cookie
+            $cookie = cookie(
+                'b5_auth_token',           // Cookie name
+                $token,                     // JWT token
+                $ttl,                       // Expiration time (minutes)
+                '/',                        // Path
+                config('session.domain'),   // Domain
+                config('app.env') === 'production', // Secure (HTTPS only in production)
+                true,                       // HttpOnly
+                false,                      // Raw
+                'lax'                       // SameSite
+            );
+
             return response()->json([
                 'success' => true,
                 'user' => $user->fresh(), // Reload with relationships
                 'token' => $token,
                 'token_type' => 'bearer',
-                'expires_in' => JWTAuth::factory()->getTTL() * 60,
+                'expires_in' => $ttl * 60,
                 'message' => 'Registration successful. Please check your email to verify your account.'
-            ], Response::HTTP_CREATED);
+            ], Response::HTTP_CREATED)->cookie($cookie);
         } catch (ValidationException $e) {
             Log::warning('Registration validation failed', [
                 'errors' => $e->errors()
@@ -227,10 +259,13 @@ class AuthController extends Controller
 
             Log::info('JWT Logout completed successfully');
 
+            // Clear the httpOnly cookie
+            $cookie = cookie()->forget('b5_auth_token');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Logged out successfully'
-            ]);
+            ])->cookie($cookie);
         } catch (JWTException $e) {
             Log::error('JWT Logout error', ['error' => $e->getMessage()]);
             return response()->json([
