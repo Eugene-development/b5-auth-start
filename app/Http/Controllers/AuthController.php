@@ -65,18 +65,26 @@ class AuthController extends Controller
             // Calculate TTL in minutes
             $ttl = JWTAuth::factory()->getTTL();
 
+            // Get cookie domain dynamically from Origin header for multi-domain support
+            $cookieDomain = $this->getCookieDomainFromOrigin($request);
+
             // Create httpOnly cookie
             $cookie = cookie(
                 'b5_auth_token',           // Cookie name
                 $token,                     // JWT token
                 $ttl,                       // Expiration time (minutes)
                 '/',                        // Path
-                config('session.domain'),   // Domain
+                $cookieDomain,              // Domain (dynamic based on origin)
                 config('app.env') === 'production', // Secure (HTTPS only in production)
                 true,                       // HttpOnly
                 false,                      // Raw
                 'lax'                       // SameSite
             );
+
+            Log::info('JWT Cookie created for login', [
+                'domain' => $cookieDomain,
+                'origin' => $request->header('Origin')
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -189,18 +197,26 @@ class AuthController extends Controller
             // Calculate TTL in minutes
             $ttl = JWTAuth::factory()->getTTL();
 
+            // Get cookie domain dynamically from Origin header for multi-domain support
+            $cookieDomain = $this->getCookieDomainFromOrigin($request);
+
             // Create httpOnly cookie
             $cookie = cookie(
                 'b5_auth_token',           // Cookie name
                 $token,                     // JWT token
                 $ttl,                       // Expiration time (minutes)
                 '/',                        // Path
-                config('session.domain'),   // Domain
+                $cookieDomain,              // Domain (dynamic based on origin)
                 config('app.env') === 'production', // Secure (HTTPS only in production)
                 true,                       // HttpOnly
                 false,                      // Raw
                 'lax'                       // SameSite
             );
+
+            Log::info('JWT Cookie created for registration', [
+                'domain' => $cookieDomain,
+                'origin' => $request->header('Origin')
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -259,8 +275,26 @@ class AuthController extends Controller
 
             Log::info('JWT Logout completed successfully');
 
-            // Clear the httpOnly cookie
-            $cookie = cookie()->forget('b5_auth_token');
+            // Get cookie domain dynamically for proper cookie deletion
+            $cookieDomain = $this->getCookieDomainFromOrigin($request);
+
+            // Clear the httpOnly cookie with the same domain it was set with
+            $cookie = cookie(
+                'b5_auth_token',
+                null,
+                -1,  // Expire immediately
+                '/',
+                $cookieDomain,
+                config('app.env') === 'production',
+                true,
+                false,
+                'lax'
+            );
+
+            Log::info('JWT Cookie cleared for logout', [
+                'domain' => $cookieDomain,
+                'origin' => $request->header('Origin')
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -738,5 +772,67 @@ class AuthController extends Controller
                 ]
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Get cookie domain from request Origin header for multi-domain support.
+     *
+     * Dynamically determines the appropriate cookie domain based on the request origin,
+     * allowing the same backend to serve multiple frontend domains.
+     *
+     * @param Request $request
+     * @return string|null Cookie domain (e.g., '.bonus5.ru', '.rubonus.pro', '.bonus.band')
+     */
+    private function getCookieDomainFromOrigin(Request $request): ?string
+    {
+        // Try Origin header first (standard for CORS requests)
+        $origin = $request->header('Origin');
+
+        // Fallback to Referer if Origin is not present (some proxies/Nginx strip Origin)
+        if (!$origin) {
+            $origin = $request->header('Referer');
+            if ($origin) {
+                Log::info('Using Referer header as Origin fallback', ['referer' => $origin]);
+            }
+        }
+
+        if (!$origin) {
+            Log::warning('No Origin or Referer header in request, using fallback domain');
+            return config('session.domain', null);
+        }
+
+        // List of allowed domains for multi-domain support
+        $allowedDomains = [
+            'bonus5.ru',
+            'rubonus.pro',
+            'bonus.band',
+            'mebelmobile.ru',
+        ];
+
+        // Parse host from origin/referer URL
+        $parsedUrl = parse_url($origin);
+        $host = $parsedUrl['host'] ?? $origin;
+
+        // Find matching domain and return with leading dot for subdomain support
+        foreach ($allowedDomains as $domain) {
+            if (str_ends_with($host, $domain)) {
+                $cookieDomain = '.' . $domain;
+                Log::info('Cookie domain determined', [
+                    'source' => $request->header('Origin') ? 'Origin' : 'Referer',
+                    'value' => $origin,
+                    'host' => $host,
+                    'cookie_domain' => $cookieDomain
+                ]);
+                return $cookieDomain;
+            }
+        }
+
+        // Fallback: no matching domain found
+        Log::warning('No matching domain found for origin/referer', [
+            'origin' => $origin,
+            'host' => $host
+        ]);
+
+        return config('session.domain', null);
     }
 }
