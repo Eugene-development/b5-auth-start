@@ -813,6 +813,15 @@ class AuthController extends Controller
         $parsedUrl = parse_url($origin);
         $host = $parsedUrl['host'] ?? $origin;
 
+        // Special handling for localhost and 127.0.0.1 (development)
+        if ($host === 'localhost' || $host === '127.0.0.1' || str_starts_with($host, 'localhost:')) {
+            Log::info('Cookie domain set to null for localhost', [
+                'host' => $host,
+                'origin' => $origin
+            ]);
+            return null; // null allows cookie to work on current domain without subdomain sharing
+        }
+
         // Find matching domain and return with leading dot for subdomain support
         foreach ($allowedDomains as $domain) {
             if (str_ends_with($host, $domain)) {
