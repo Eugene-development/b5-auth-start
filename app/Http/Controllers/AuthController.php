@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Company;
+use App\Models\CompanyStatus;
 use App\Models\User;
 use App\Notifications\ResetPasswordNotification;
 use Illuminate\Http\Request;
@@ -124,7 +126,7 @@ class AuthController extends Controller
     /**
      * Handle user registration with JWT
      *
-     * Creates new user account and returns JWT token
+     * Creates new user account with company and returns JWT token
      */
     public function register(Request $request)
     {
@@ -132,7 +134,7 @@ class AuthController extends Controller
             Log::info('JWT Registration attempt', [
                 'name' => $request->input('name'),
                 'email' => $request->input('email'),
-                'region' => $request->input('region'),
+                'company_name' => $request->input('company_name'),
                 'phone' => $request->input('phone'),
             ]);
 
@@ -141,38 +143,57 @@ class AuthController extends Controller
                 'name' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:users',
                 'password' => 'required|string|min:8|confirmed',
-                'region' => 'nullable|string|max:255',
+                'company_name' => 'required|string|min:2|max:255',
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
             ]);
 
             // Get registration domain from Origin or Referer header
             $registrationDomain = $this->getRegistrationDomain($request);
 
-            // Determine status_id based on registration domain
-            $statusId = $this->getStatusIdByDomain($registrationDomain);
+            // Get status IDs
+            $companyStatusId = $this->getCompanyStatusId('not-defined');
+            $userStatusId = $this->getUserStatusId('manager');
 
-            Log::info('Creating user with status', [
+            Log::info('Creating company and user', [
                 'registration_domain' => $registrationDomain,
-                'status_id' => $statusId
+                'company_status_id' => $companyStatusId,
+                'user_status_id' => $userStatusId
             ]);
 
-            // Create new user
-            $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'password' => Hash::make($request->password),
-                'region' => $request->region,
-                'registration_domain' => $registrationDomain,
-                'status_id' => $statusId,
-            ]);
-
-            // Create user phone if provided
-            if ($request->filled('phone')) {
-                $user->phones()->create([
-                    'value' => $request->phone,
-                    'is_primary' => true,
+            // Create company and user in transaction
+            $result = DB::transaction(function () use ($request, $registrationDomain, $companyStatusId, $userStatusId) {
+                // Create company
+                $company = Company::create([
+                    'name' => $request->company_name,
+                    'legal_name' => $request->company_name,
+                    'ban' => false,
+                    'is_active' => true,
+                    'status_id' => $companyStatusId,
                 ]);
-            }
+
+                // Create user linked to company
+                $user = User::create([
+                    'name' => $request->name,
+                    'email' => $request->email,
+                    'password' => Hash::make($request->password),
+                    'registration_domain' => $registrationDomain,
+                    'status_id' => $userStatusId,
+                    'company_id' => $company->id,
+                ]);
+
+                // Create user phone if provided
+                if ($request->filled('phone')) {
+                    $user->phones()->create([
+                        'value' => $request->phone,
+                        'is_primary' => true,
+                    ]);
+                }
+
+                return ['user' => $user, 'company' => $company];
+            });
+
+            $user = $result['user'];
+            $company = $result['company'];
 
             // Send email verification notification
             try {
@@ -191,7 +212,8 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'status_id' => $user->status_id,
-                'type' => $user->type
+                'company_id' => $company->id,
+                'company_name' => $company->name
             ]);
 
             // Calculate TTL in minutes
@@ -536,9 +558,9 @@ class AuthController extends Controller
         // Map domains to status slugs
         $domainStatusMap = [
             'admin.bonus.band' => 'admin',
-            'bonus.band' => 'curators',
-            'rubonus.info' => 'managers',
-            'bonus5.ru' => 'agents',
+            'bonus.band' => 'curator',
+            'rubonus.info' => 'manager',
+            'bonus5.ru' => 'agent',
         ];
 
         // Check if domain matches any known domain
@@ -575,6 +597,49 @@ class AuthController extends Controller
         }
 
         return $defaultStatus->id;
+    }
+
+    /**
+     * Get company status_id by slug.
+     */
+    private function getCompanyStatusId(string $slug): string
+    {
+        $status = DB::table('company_statuses')
+            ->where('slug', $slug)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$status) {
+            // Fallback to default company status
+            $status = DB::table('company_statuses')
+                ->where('is_default', true)
+                ->where('is_active', true)
+                ->first();
+        }
+
+        if (!$status) {
+            throw new \Exception("Company status '{$slug}' not found in database");
+        }
+
+        return $status->id;
+    }
+
+    /**
+     * Get user status_id by slug.
+     */
+    private function getUserStatusId(string $slug): string
+    {
+        $status = DB::table('user_statuses')
+            ->where('slug', $slug)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$status) {
+            // Fallback to default user status
+            return $this->getDefaultStatusId();
+        }
+
+        return $status->id;
     }
 
     /**

@@ -29,6 +29,7 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         'region',
         'registration_domain',
         'status_id',
+        'company_id',
     ];
 
     /**
@@ -135,6 +136,14 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
     public function status()
     {
         return $this->belongsTo(UserStatus::class, 'status_id');
+    }
+
+    /**
+     * Get the company that the user belongs to.
+     */
+    public function company()
+    {
+        return $this->belongsTo(Company::class, 'company_id');
     }
 
     /**
