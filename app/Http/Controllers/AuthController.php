@@ -71,16 +71,17 @@ class AuthController extends Controller
             $cookieDomain = $this->getCookieDomainFromOrigin($request);
 
             // Create httpOnly cookie
+            // SameSite=None required for cross-origin requests (rubonus.pro -> api.rubonus.pro)
             $cookie = cookie(
                 'b5_auth_token',           // Cookie name
                 $token,                     // JWT token
                 $ttl,                       // Expiration time (minutes)
                 '/',                        // Path
                 $cookieDomain,              // Domain (dynamic based on origin)
-                config('app.env') === 'production', // Secure (HTTPS only in production)
+                true,                       // Secure (required for SameSite=None)
                 true,                       // HttpOnly
                 false,                      // Raw
-                'lax'                       // SameSite
+                'none'                      // SameSite (none for cross-origin)
             );
 
             Log::info('JWT Cookie created for login', [
@@ -223,16 +224,17 @@ class AuthController extends Controller
             $cookieDomain = $this->getCookieDomainFromOrigin($request);
 
             // Create httpOnly cookie
+            // SameSite=None required for cross-origin requests (rubonus.pro -> api.rubonus.pro)
             $cookie = cookie(
                 'b5_auth_token',           // Cookie name
                 $token,                     // JWT token
                 $ttl,                       // Expiration time (minutes)
                 '/',                        // Path
                 $cookieDomain,              // Domain (dynamic based on origin)
-                config('app.env') === 'production', // Secure (HTTPS only in production)
+                true,                       // Secure (required for SameSite=None)
                 true,                       // HttpOnly
                 false,                      // Raw
-                'lax'                       // SameSite
+                'none'                      // SameSite (none for cross-origin)
             );
 
             Log::info('JWT Cookie created for registration', [
@@ -301,16 +303,17 @@ class AuthController extends Controller
             $cookieDomain = $this->getCookieDomainFromOrigin($request);
 
             // Clear the httpOnly cookie with the same domain it was set with
+            // SameSite=None required for cross-origin requests
             $cookie = cookie(
                 'b5_auth_token',
                 null,
                 -1,  // Expire immediately
                 '/',
                 $cookieDomain,
-                config('app.env') === 'production',
+                true,                       // Secure (required for SameSite=None)
                 true,
                 false,
-                'lax'
+                'none'                      // SameSite (none for cross-origin)
             );
 
             Log::info('JWT Cookie cleared for logout', [
