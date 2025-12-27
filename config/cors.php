@@ -44,6 +44,7 @@ return [
         'https://rubonus.pro',
         'https://www.rubonus.pro',
         'https://auth.rubonus.pro',
+        'https://admin.rubonus.pro',
 
         // Production - other domains
         'https://mebelmobile.ru',
