@@ -144,7 +144,8 @@ class AuthController extends Controller
                 'name' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:users',
                 'password' => 'required|string|min:8|confirmed',
-                'company_name' => 'required|string|min:2|max:255',
+                'company_name' => 'nullable|string|min:2|max:255',
+                'region' => 'nullable|string|max:255',
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
             ]);
 
@@ -163,24 +164,34 @@ class AuthController extends Controller
 
             // Create company and user in transaction
             $result = DB::transaction(function () use ($request, $registrationDomain, $companyStatusId, $userStatusId) {
-                // Create company
-                $company = Company::create([
-                    'name' => $request->company_name,
-                    'legal_name' => $request->company_name,
-                    'ban' => false,
-                    'is_active' => true,
-                    'status_id' => $companyStatusId,
-                ]);
+                $company = null;
 
-                // Create user linked to company
+                // Create company only if company_name is provided
+                if ($request->filled('company_name')) {
+                    $company = Company::create([
+                        'name' => $request->company_name,
+                        'legal_name' => $request->company_name,
+                        'ban' => false,
+                        'is_active' => true,
+                        'status_id' => $companyStatusId,
+                    ]);
+                }
+
+                // Create user linked to company (if exists)
                 $user = User::create([
                     'name' => $request->name,
                     'email' => $request->email,
                     'password' => Hash::make($request->password),
                     'registration_domain' => $registrationDomain,
                     'status_id' => $userStatusId,
-                    'company_id' => $company->id,
+                    'company_id' => $company?->id,
                 ]);
+
+                // Add region if provided
+                if ($request->filled('region')) {
+                    $user->region = $request->region;
+                    $user->save();
+                }
 
                 // Create user phone if provided
                 if ($request->filled('phone')) {
@@ -213,8 +224,8 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'status_id' => $user->status_id,
-                'company_id' => $company->id,
-                'company_name' => $company->name
+                'company_id' => $company?->id,
+                'company_name' => $company?->name
             ]);
 
             // Calculate TTL in minutes
