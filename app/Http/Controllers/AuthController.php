@@ -147,7 +147,20 @@ class AuthController extends Controller
                 'company_name' => 'nullable|string|min:2|max:255',
                 'region' => 'nullable|string|max:255',
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
+                'ref' => 'nullable|integer',
             ]);
+
+            // Validate referrer if provided
+            $referrerId = null;
+            if ($request->filled('ref')) {
+                $referralService = app(\App\Services\ReferralService::class);
+                $referrerId = $referralService->validateReferrer($request->ref, 0);
+
+                Log::info('Referrer validation result', [
+                    'ref_input' => $request->ref,
+                    'validated_referrer_id' => $referrerId
+                ]);
+            }
 
             // Get registration domain from Origin or Referer header
             $registrationDomain = $this->getRegistrationDomain($request);
@@ -163,7 +176,7 @@ class AuthController extends Controller
             ]);
 
             // Create company and user in transaction
-            $result = DB::transaction(function () use ($request, $registrationDomain, $companyStatusId, $userStatusId) {
+            $result = DB::transaction(function () use ($request, $registrationDomain, $companyStatusId, $userStatusId, $referrerId) {
                 $company = null;
 
                 // Create company only if company_name is provided
@@ -177,7 +190,7 @@ class AuthController extends Controller
                     ]);
                 }
 
-                // Create user linked to company (if exists)
+                // Create user linked to company (if exists) and referrer (if validated)
                 $user = User::create([
                     'name' => $request->name,
                     'email' => $request->email,
@@ -185,6 +198,7 @@ class AuthController extends Controller
                     'registration_domain' => $registrationDomain,
                     'status_id' => $userStatusId,
                     'company_id' => $company?->id,
+                    'user_id' => $referrerId, // ID реферера (если есть)
                 ]);
 
                 // Add region if provided
@@ -225,7 +239,8 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'status_id' => $user->status_id,
                 'company_id' => $company?->id,
-                'company_name' => $company?->name
+                'company_name' => $company?->name,
+                'referrer_id' => $user->user_id
             ]);
 
             // Calculate TTL in minutes
