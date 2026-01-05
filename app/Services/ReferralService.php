@@ -29,33 +29,31 @@ class ReferralService
     /**
      * Валидировать и получить ID реферера.
      *
-     * @param int|string|null $referrerId ID потенциального реферера
+     * @param string|null $referrerKey Ключ потенциального реферера
      * @param int $newUserId ID нового пользователя (0 если ещё не создан)
      * @return int|null Валидный ID реферера или null
      */
-    public function validateReferrer($referrerId, int $newUserId = 0): ?int
+    public function validateReferrer($referrerKey, int $newUserId = 0): ?int
     {
-        // Проверяем, что referrerId передан и является числом
-        if ($referrerId === null || $referrerId === '' || !is_numeric($referrerId)) {
+        // Проверяем, что referrerKey передан и не пуст
+        if ($referrerKey === null || $referrerKey === '') {
             return null;
         }
 
-        $referrerId = (int) $referrerId;
-
-        // Проверяем, что это не самореферальность
-        if ($newUserId > 0 && $referrerId === $newUserId) {
-            Log::info('ReferralService: Self-referral attempt rejected', [
-                'referrer_id' => $referrerId,
-                'new_user_id' => $newUserId
+        // Находим реферера по key
+        $referrer = User::where('key', $referrerKey)->first();
+        if (!$referrer) {
+            Log::info('ReferralService: Referrer not found', [
+                'referrer_key' => $referrerKey
             ]);
             return null;
         }
 
-        // Проверяем, что реферер существует
-        $referrer = User::find($referrerId);
-        if (!$referrer) {
-            Log::info('ReferralService: Referrer not found', [
-                'referrer_id' => $referrerId
+        // Проверяем, что это не самореферальность
+        if ($newUserId > 0 && $referrer->id === $newUserId) {
+            Log::info('ReferralService: Self-referral attempt rejected', [
+                'referrer_id' => $referrer->id,
+                'new_user_id' => $newUserId
             ]);
             return null;
         }
@@ -63,7 +61,7 @@ class ReferralService
         // Проверяем, что реферер активен и не забанен
         if ($referrer->ban || !$referrer->is_active) {
             Log::info('ReferralService: Referrer is banned or inactive', [
-                'referrer_id' => $referrerId,
+                'referrer_id' => $referrer->id,
                 'ban' => $referrer->ban,
                 'is_active' => $referrer->is_active
             ]);
@@ -71,20 +69,20 @@ class ReferralService
         }
 
         // Проверяем на циклы (если новый пользователь уже существует)
-        if ($newUserId > 0 && $this->hasCycle($referrerId, $newUserId)) {
+        if ($newUserId > 0 && $this->hasCycle($referrer->id, $newUserId)) {
             Log::warning('ReferralService: Cycle detected in referral chain', [
-                'referrer_id' => $referrerId,
+                'referrer_id' => $referrer->id,
                 'new_user_id' => $newUserId
             ]);
             return null;
         }
 
         Log::info('ReferralService: Referrer validated successfully', [
-            'referrer_id' => $referrerId,
+            'referrer_id' => $referrer->id,
             'referrer_name' => $referrer->name
         ]);
 
-        return $referrerId;
+        return $referrer->id;
     }
 
     /**

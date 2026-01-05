@@ -147,7 +147,7 @@ class AuthController extends Controller
                 'company_name' => 'nullable|string|min:2|max:255',
                 'region' => 'nullable|string|max:255',
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
-                'ref' => 'nullable|integer',
+                'ref' => 'nullable|string|max:255',
             ]);
 
             // Validate referrer if provided

@@ -175,8 +175,8 @@ class ReferralServicePropertyTest extends TestCase
             'is_active' => true,
         ]);
 
-        // Валидируем реферера (новый пользователь ещё не создан, ID = 0)
-        $validatedId = $this->referralService->validateReferrer($referrer->id, 0);
+        // Валидируем реферера по key (новый пользователь ещё не создан, ID = 0)
+        $validatedId = $this->referralService->validateReferrer($referrer->key, 0);
 
         $this->assertEquals(
             $referrer->id,
@@ -204,9 +204,9 @@ class ReferralServicePropertyTest extends TestCase
      */
     public function test_property_nonexistent_referrer_rejected(): void
     {
-        $nonExistentId = 999999;
+        $nonExistentKey = 'nonexistent-key-999999';
 
-        $validatedId = $this->referralService->validateReferrer($nonExistentId, 0);
+        $validatedId = $this->referralService->validateReferrer($nonExistentKey, 0);
 
         $this->assertNull($validatedId, 'Non-existent referrer should be rejected');
     }
@@ -221,7 +221,7 @@ class ReferralServicePropertyTest extends TestCase
             'is_active' => true,
         ]);
 
-        $validatedId = $this->referralService->validateReferrer($bannedUser->id, 0);
+        $validatedId = $this->referralService->validateReferrer($bannedUser->key, 0);
 
         $this->assertNull($validatedId, 'Banned referrer should be rejected');
     }
@@ -236,7 +236,7 @@ class ReferralServicePropertyTest extends TestCase
             'is_active' => false,
         ]);
 
-        $validatedId = $this->referralService->validateReferrer($inactiveUser->id, 0);
+        $validatedId = $this->referralService->validateReferrer($inactiveUser->key, 0);
 
         $this->assertNull($validatedId, 'Inactive referrer should be rejected');
     }
@@ -329,7 +329,7 @@ class ReferralRegistrationPropertyTest extends TestCase
             'email' => "test{$iteration}@example.com",
             'password' => 'password123',
             'password_confirmation' => 'password123',
-            'ref' => $referrer->id,
+            'ref' => $referrer->key,
         ]);
 
         $response->assertStatus(201);
@@ -397,7 +397,7 @@ class ReferralRegistrationPropertyTest extends TestCase
             'email' => 'invalidref@example.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
-            'ref' => 999999, // Несуществующий ID
+            'ref' => 'nonexistent-key-999999', // Несуществующий key
         ]);
 
         $response->assertStatus(201);
