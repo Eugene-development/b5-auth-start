@@ -151,14 +151,14 @@ class AuthController extends Controller
             ]);
 
             // Validate referrer if provided
-            $referrerId = null;
+            $referrerKey = null;
             if ($request->filled('ref')) {
                 $referralService = app(\App\Services\ReferralService::class);
-                $referrerId = $referralService->validateReferrer($request->ref, 0);
+                $referrerKey = $referralService->validateReferrer($request->ref, 0);
 
                 Log::info('Referrer validation result', [
                     'ref_input' => $request->ref,
-                    'validated_referrer_id' => $referrerId
+                    'validated_referrer_key' => $referrerKey
                 ]);
             }
 
@@ -176,7 +176,7 @@ class AuthController extends Controller
             ]);
 
             // Create company and user in transaction
-            $result = DB::transaction(function () use ($request, $registrationDomain, $companyStatusId, $userStatusId, $referrerId) {
+            $result = DB::transaction(function () use ($request, $registrationDomain, $companyStatusId, $userStatusId, $referrerKey) {
                 $company = null;
 
                 // Create company only if company_name is provided
@@ -198,7 +198,7 @@ class AuthController extends Controller
                     'registration_domain' => $registrationDomain,
                     'status_id' => $userStatusId,
                     'company_id' => $company?->id,
-                    'user_id' => $referrerId, // ID реферера (если есть)
+                    'referrer_key' => $referrerKey, // ULID ключ реферера (если есть)
                 ]);
 
                 // Add region if provided
@@ -240,7 +240,7 @@ class AuthController extends Controller
                 'status_id' => $user->status_id,
                 'company_id' => $company?->id,
                 'company_name' => $company?->name,
-                'referrer_id' => $user->user_id
+                'referrer_key' => $user->referrer_key
             ]);
 
             // Calculate TTL in minutes

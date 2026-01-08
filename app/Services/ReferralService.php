@@ -27,13 +27,13 @@ class ReferralService
     const MAX_CHAIN_DEPTH = 10;
 
     /**
-     * Валидировать и получить ID реферера.
+     * Валидировать и получить ключ реферера.
      *
      * @param string|null $referrerKey Ключ потенциального реферера
      * @param int $newUserId ID нового пользователя (0 если ещё не создан)
-     * @return int|null Валидный ID реферера или null
+     * @return string|null Валидный ключ реферера или null
      */
-    public function validateReferrer($referrerKey, int $newUserId = 0): ?int
+    public function validateReferrer($referrerKey, int $newUserId = 0): ?string
     {
         // Проверяем, что referrerKey передан и не пуст
         if ($referrerKey === null || $referrerKey === '') {
@@ -78,11 +78,11 @@ class ReferralService
         }
 
         Log::info('ReferralService: Referrer validated successfully', [
-            'referrer_id' => $referrer->id,
+            'referrer_key' => $referrer->key,
             'referrer_name' => $referrer->name
         ]);
 
-        return $referrer->id;
+        return $referrer->key;
     }
 
     /**

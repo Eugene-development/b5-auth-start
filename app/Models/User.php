@@ -30,7 +30,7 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         'registration_domain',
         'status_id',
         'company_id',
-        'user_id', // ID реферера
+        'referrer_key', // ULID ключ реферера
     ];
 
     /**
