@@ -31,15 +31,23 @@ class AuthController extends Controller
             Log::info('JWT Login attempt', [
                 'email' => $request->input('email'),
                 'has_password' => $request->has('password'),
+                'remember' => $request->input('remember', false),
             ]);
 
             // Validate input data
             $request->validate([
                 'email' => 'required|email',
                 'password' => 'required|string',
+                'remember' => 'nullable|boolean',
             ]);
 
             $credentials = $request->only('email', 'password');
+            $remember = $request->boolean('remember', false);
+
+            // Set custom TTL if "remember me" is checked (30 days = 43200 minutes)
+            if ($remember) {
+                JWTAuth::factory()->setTTL(43200); // 30 days in minutes
+            }
 
             // Attempt to generate JWT token
             if (!$token = JWTAuth::attempt($credentials)) {
@@ -61,10 +69,11 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'status_id' => $user->status_id,
-                'type' => $user->type
+                'type' => $user->type,
+                'remember' => $remember
             ]);
 
-            // Calculate TTL in minutes
+            // Calculate TTL in minutes (will be 43200 if remember, otherwise default)
             $ttl = JWTAuth::factory()->getTTL();
 
             // Get cookie domain dynamically from Origin header for multi-domain support
