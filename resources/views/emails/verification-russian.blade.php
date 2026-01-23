@@ -83,7 +83,7 @@
                                     <td class="header-padding" style="background: linear-gradient(135deg, #4f46e5 0%, #80caff 100%); padding: 40px 30px; text-align: center;">
                                         <!-- Logo/Brand -->
                                         <h1 class="title-text" style="margin: 0; font-size: 48px; font-weight: 600; letter-spacing: 8px; color: #ffffff; text-transform: uppercase; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);">
-                                            BONUS 5
+                                            RUBONUS
                                         </h1>
                                         <div style="margin-top: 8px; height: 3px; width: 80px; background: rgba(255, 255, 255, 0.3); margin-left: auto; margin-right: auto; border-radius: 2px;"></div>
                                     </td>
@@ -247,7 +247,7 @@
                                         </p>
                                         <p style="margin: 0; font-size: 14px; color: #6b7280; line-height: 1.6;">
                                             С уважением,<br>
-                                            <strong style="color: #ffffff; letter-spacing: 2px;">Команда BONUS 5</strong>
+                                            <strong style="color: #ffffff; letter-spacing: 2px;">Команда RUBONUS</strong>
                                         </p>
                                     </td>
                                 </tr>
