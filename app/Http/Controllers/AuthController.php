@@ -56,9 +56,9 @@ class AuthController extends Controller
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'The provided credentials are incorrect.',
+                    'message' => 'Неверный email или пароль.',
                     'errors' => [
-                        'email' => ['The provided credentials are incorrect.']
+                        'email' => ['Неверный email или пароль.']
                     ]
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }

@@ -86,9 +86,9 @@ class AuthTest extends TestCase
         $response->assertStatus(422)
                 ->assertJson([
                     'success' => false,
-                    'message' => 'The provided credentials are incorrect.',
+                    'message' => 'Неверный email или пароль.',
                     'errors' => [
-                        'email' => ['The provided credentials are incorrect.']
+                        'email' => ['Неверный email или пароль.']
                     ]
                 ]);
     }
