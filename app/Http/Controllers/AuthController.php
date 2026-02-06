@@ -174,9 +174,9 @@ class AuthController extends Controller
             // Get registration domain from Origin or Referer header
             $registrationDomain = $this->getRegistrationDomain($request);
 
-            // Get status IDs
+            // Get status IDs based on registration domain
             $companyStatusId = $this->getCompanyStatusId('not-defined');
-            $userStatusId = $this->getUserStatusId('manager');
+            $userStatusId = $this->getStatusIdByDomain($registrationDomain);
 
             Log::info('Creating company and user', [
                 'registration_domain' => $registrationDomain,
@@ -577,10 +577,10 @@ class AuthController extends Controller
      * Determine user status_id based on registration domain.
      *
      * Domain mapping:
-     * - admin.bonus.band -> Админ
-     * - bonus.band -> Куратор
-     * - rubonus.info -> Менеджер
-     * - bonus5.ru -> Агент
+     * - admin.rubonus.pro -> Куратор (curator registration)
+     * - rubonus.pro -> Агент (agent registration)
+     * - localhost:5173 -> Агент (development b5-agent)
+     * - localhost:5174 -> Куратор (development b5-admin/curator)
      * - all others -> Не определено (default)
      */
     private function getStatusIdByDomain(?string $registrationDomain): string
@@ -592,17 +592,23 @@ class AuthController extends Controller
         // Extract host from full URL
         $parsedUrl = parse_url($registrationDomain);
         $host = $parsedUrl['host'] ?? $registrationDomain;
+        $port = $parsedUrl['port'] ?? null;
+        
+        // Build host:port string for localhost matching
+        $hostWithPort = $port ? "{$host}:{$port}" : $host;
 
-        // Map domains to status slugs
+        // Map domains to status slugs (including localhost ports for development)
         $domainStatusMap = [
-            'admin.bonus.band' => 'admin',
-            'bonus.band' => 'curator',
-            'rubonus.info' => 'manager',
-            'bonus5.ru' => 'agent',
+            // Production domains
+            'admin.rubonus.pro' => 'curator',  // Curator registration
+            'rubonus.pro' => 'agent',          // Agent registration
+            // Development localhost ports
+            'localhost:5173' => 'agent',       // b5-agent
+            'localhost:5174' => 'curator',     // b5-admin (curator registration)
         ];
 
-        // Check if domain matches any known domain
-        $statusSlug = $domainStatusMap[$host] ?? null;
+        // Check if domain or hostWithPort matches any known domain
+        $statusSlug = $domainStatusMap[$host] ?? $domainStatusMap[$hostWithPort] ?? null;
 
         if ($statusSlug) {
             // Get status_id by slug
