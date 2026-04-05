@@ -27,4 +27,8 @@ Route::middleware(['auth.cookie', 'auth:api'])->group(function () {
         Route::post('/verification-notification', [AuthController::class, 'sendEmailVerification'])
             ->middleware('throttle:6,1'); // 6 attempts per minute
     });
+
+    // Commercial proposal (admin only, checked in controller)
+    Route::post('/send-commercial-proposal', [AuthController::class, 'sendCommercialProposal'])
+        ->middleware('throttle:10,1'); // 10 attempts per minute
 });

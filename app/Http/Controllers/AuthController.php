@@ -953,4 +953,84 @@ class AuthController extends Controller
 
         return config('session.domain', null);
     }
+
+    /**
+     * Send a commercial proposal email to a partner.
+     * Only users with admin status can send proposals.
+     */
+    public function sendCommercialProposal(Request $request)
+    {
+        try {
+            $user = Auth::user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Пользователь не авторизован.'
+                ], Response::HTTP_UNAUTHORIZED);
+            }
+
+            // Validate input
+            $request->validate([
+                'recipient_email' => 'required|email|max:255',
+                'subject' => 'required|string|max:500',
+                'body' => 'required|string|min:10',
+            ]);
+
+            // Check if user has admin status
+            $userStatus = $user->status;
+            if (!$userStatus || $userStatus->slug !== 'admin') {
+                Log::warning('Non-admin user attempted to send commercial proposal', [
+                    'user_id' => $user->id,
+                    'user_status' => $userStatus?->slug,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Доступ запрещён. Только администраторы могут отправлять коммерческие предложения.'
+                ], Response::HTTP_FORBIDDEN);
+            }
+
+            $recipientEmail = $request->input('recipient_email');
+            $subject = $request->input('subject');
+            $body = $request->input('body');
+
+            \Illuminate\Support\Facades\Mail::to($recipientEmail)->send(
+                new \App\Mail\CommercialProposalMail(
+                    subject: $subject,
+                    body: $body,
+                    senderName: $user->name,
+                    senderEmail: $user->email
+                )
+            );
+
+            Log::info('Commercial proposal sent successfully', [
+                'recipient' => $recipientEmail,
+                'subject' => $subject,
+                'sender_user_id' => $user->id,
+                'sender_name' => $user->name,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Коммерческое предложение успешно отправлено на ' . $recipientEmail
+            ]);
+
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка валидации.',
+                'errors' => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (Exception $e) {
+            Log::error('Failed to send commercial proposal', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка при отправке письма: ' . $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
 }
+
