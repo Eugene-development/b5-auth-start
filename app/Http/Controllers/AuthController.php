@@ -994,20 +994,25 @@ class AuthController extends Controller
             $subject = $request->input('subject');
             $body = $request->input('body');
 
+            // Static sender info — always from project lead
+            $staticSenderName = 'Челноков Евгений';
+            $staticSenderEmail = 'info@rubonus.pro';
+
             \Illuminate\Support\Facades\Mail::to($recipientEmail)->send(
                 new \App\Mail\CommercialProposalMail(
                     subject: $subject,
                     body: $body,
-                    senderName: $user->name,
-                    senderEmail: $user->email
+                    senderName: $staticSenderName,
+                    senderEmail: $staticSenderEmail
                 )
             );
 
             Log::info('Commercial proposal sent successfully', [
                 'recipient' => $recipientEmail,
                 'subject' => $subject,
-                'sender_user_id' => $user->id,
-                'sender_name' => $user->name,
+                'admin_user_id' => $user->id,
+                'admin_name' => $user->name,
+                'static_sender' => $staticSenderName,
             ]);
 
             return response()->json([

@@ -39,6 +39,11 @@ if [ ! -f "/var/www/config/jwt.php" ]; then
     echo "✅ JWT configuration published"
 fi
 
+# Discover and register all package service providers (needed because composer install uses --no-scripts)
+echo "🔍 Discovering package service providers..."
+php artisan package:discover --ansi 2>/dev/null || echo "⚠️  Package discover failed, continuing..."
+echo "✅ Package discovery complete"
+
 if [ -f "/run/secrets/app_url" ]; then
     export APP_URL=$(cat /run/secrets/app_url)
     echo "✅ APP_URL loaded from secret: $APP_URL"
