@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Company;
-use App\Models\CompanyStatus;
 use App\Models\User;
 use App\Notifications\ResetPasswordNotification;
+use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
@@ -13,10 +13,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
-use Exception;
+use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
@@ -50,27 +50,40 @@ class AuthController extends Controller
             }
 
             // Attempt to generate JWT token
-            if (!$token = JWTAuth::attempt($credentials)) {
+            if (! $token = JWTAuth::attempt($credentials)) {
                 Log::warning('JWT Login failed - invalid credentials', [
-                    'email' => $request->input('email')
+                    'email' => $request->input('email'),
                 ]);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Неверный email или пароль.',
                     'errors' => [
-                        'email' => ['Неверный email или пароль.']
-                    ]
+                        'email' => ['Неверный email или пароль.'],
+                    ],
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             $user = Auth::user();
+
+            if (! $user || $user->ban || ! $user->is_active) {
+                JWTAuth::setToken($token)->invalidate();
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Учётная запись недоступна.',
+                    'errors' => [
+                        'email' => ['Учётная запись заблокирована или отключена.'],
+                    ],
+                ], Response::HTTP_FORBIDDEN);
+            }
 
             Log::info('JWT Login successful', [
                 'user_id' => $user->id,
                 'email' => $user->email,
                 'status_id' => $user->status_id,
                 'type' => $user->type,
-                'remember' => $remember
+                'remember' => $remember,
             ]);
 
             // Calculate TTL in minutes (will be 43200 if remember, otherwise default)
@@ -95,7 +108,7 @@ class AuthController extends Controller
 
             Log::info('JWT Cookie created for login', [
                 'domain' => $cookieDomain,
-                'origin' => $request->header('Origin')
+                'origin' => $request->header('Origin'),
             ]);
 
             return response()->json([
@@ -104,31 +117,33 @@ class AuthController extends Controller
                 'token' => $token,
                 'token_type' => 'bearer',
                 'expires_in' => $ttl * 60, // in seconds
-                'message' => 'Login successful'
+                'message' => 'Login successful',
             ])->cookie($cookie);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'The given data was invalid.',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (JWTException $e) {
             Log::error('JWT Token creation error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Could not create token.',
                 'errors' => [
-                    'general' => ['Authentication failed. Please try again.']
-                ]
+                    'general' => ['Authentication failed. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         } catch (Exception $e) {
             Log::error('Login error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during login.',
                 'errors' => [
-                    'general' => ['An unexpected error occurred. Please try again.']
-                ]
+                    'general' => ['An unexpected error occurred. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -167,21 +182,22 @@ class AuthController extends Controller
 
                 Log::info('Referrer validation result', [
                     'ref_input' => $request->ref,
-                    'validated_referrer_key' => $referrerKey
+                    'validated_referrer_key' => $referrerKey,
                 ]);
             }
 
             // Get registration domain from Origin or Referer header
             $registrationDomain = $this->getRegistrationDomain($request);
 
-            // Get status IDs based on registration domain
+            // Public registration always creates an agent. Origin/Referer is audit
+            // metadata only and must never grant a privileged status.
             $companyStatusId = $this->getCompanyStatusId('not-defined');
-            $userStatusId = $this->getStatusIdByDomain($registrationDomain);
+            $userStatusId = $this->getPublicRegistrationStatusId();
 
             Log::info('Creating company and user', [
                 'registration_domain' => $registrationDomain,
                 'company_status_id' => $companyStatusId,
-                'user_status_id' => $userStatusId
+                'user_status_id' => $userStatusId,
             ]);
 
             // Create company and user in transaction
@@ -236,7 +252,7 @@ class AuthController extends Controller
             } catch (\Exception $e) {
                 Log::error('Failed to send email verification', [
                     'user_id' => $user->id,
-                    'error' => $e->getMessage()
+                    'error' => $e->getMessage(),
                 ]);
             }
 
@@ -249,7 +265,7 @@ class AuthController extends Controller
                 'status_id' => $user->status_id,
                 'company_id' => $company?->id,
                 'company_name' => $company?->name,
-                'referrer_key' => $user->referrer_key
+                'referrer_key' => $user->referrer_key,
             ]);
 
             // Calculate TTL in minutes
@@ -274,7 +290,7 @@ class AuthController extends Controller
 
             Log::info('JWT Cookie created for registration', [
                 'domain' => $cookieDomain,
-                'origin' => $request->header('Origin')
+                'origin' => $request->header('Origin'),
             ]);
 
             return response()->json([
@@ -283,39 +299,110 @@ class AuthController extends Controller
                 'token' => $token,
                 'token_type' => 'bearer',
                 'expires_in' => $ttl * 60,
-                'message' => 'Registration successful. Please check your email to verify your account.'
+                'message' => 'Registration successful. Please check your email to verify your account.',
             ], Response::HTTP_CREATED)->cookie($cookie);
         } catch (ValidationException $e) {
             Log::warning('Registration validation failed', [
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'The given data was invalid.',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (JWTException $e) {
             Log::error('JWT Token creation error after registration', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'User created but could not create token.',
                 'errors' => [
-                    'general' => ['Registration partially successful. Please try to log in.']
-                ]
+                    'general' => ['Registration partially successful. Please try to log in.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         } catch (Exception $e) {
             Log::error('Registration error', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during registration.',
                 'errors' => [
-                    'general' => ['An unexpected error occurred. Please try again.']
-                ]
+                    'general' => ['An unexpected error occurred. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Create a user from the administrative panel without replacing the
+     * administrator's JWT cookie.
+     */
+    public function createManagedUser(Request $request)
+    {
+        $actor = Auth::guard('api')->user();
+        $actorStatus = $actor?->status?->slug;
+
+        if (! $actor || $actor->ban || ! $actor->is_active || ! in_array($actorStatus, ['admin', 'curator'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Недостаточно прав для создания пользователя.',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'region' => ['nullable', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/'],
+            'status_id' => [
+                'required',
+                'string',
+                Rule::exists('user_statuses', 'id')->where('is_active', true),
+            ],
+        ]);
+
+        $targetStatus = DB::table('user_statuses')->where('id', $validated['status_id'])->first();
+        if (
+            $actorStatus === 'curator'
+            && ! in_array($targetStatus?->slug, ['curator', 'manager', 'designer'], true)
+        ) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Куратор не может назначить этот статус.',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        $user = DB::transaction(function () use ($validated): User {
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'region' => $validated['region'] ?? null,
+                'status_id' => $validated['status_id'],
+                'ban' => false,
+                'is_active' => true,
+            ]);
+
+            if (! empty($validated['phone'])) {
+                $user->phones()->create([
+                    'value' => $validated['phone'],
+                    'is_primary' => true,
+                ]);
+            }
+
+            return $user;
+        });
+
+        return response()->json([
+            'success' => true,
+            'user' => $user->fresh(['status', 'phones']),
+            'message' => 'Пользователь создан.',
+        ], Response::HTTP_CREATED);
     }
 
     /**
@@ -330,7 +417,7 @@ class AuthController extends Controller
             Log::info('JWT Logout initiated', ['user_id' => $user?->id, 'email' => $user?->email]);
 
             // Invalidate the token
-            JWTAuth::invalidate(JWTAuth::getToken());
+            JWTAuth::invalidate();
 
             Log::info('JWT Logout completed successfully');
 
@@ -353,30 +440,32 @@ class AuthController extends Controller
 
             Log::info('JWT Cookie cleared for logout', [
                 'domain' => $cookieDomain,
-                'origin' => $request->header('Origin')
+                'origin' => $request->header('Origin'),
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Logged out successfully'
+                'message' => 'Logged out successfully',
             ])->cookie($cookie);
         } catch (JWTException $e) {
             Log::error('JWT Logout error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to logout, please try again.',
                 'errors' => [
-                    'general' => ['Failed to invalidate token.']
-                ]
+                    'general' => ['Failed to invalidate token.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         } catch (Exception $e) {
             Log::error('Logout error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during logout.',
                 'errors' => [
-                    'general' => ['An unexpected error occurred. Please try again.']
-                ]
+                    'general' => ['An unexpected error occurred. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -384,28 +473,39 @@ class AuthController extends Controller
     /**
      * Refresh JWT token
      *
-     * Returns a new JWT token
+     * Rotates the JWT and replaces the httpOnly cookie.
      */
     public function refresh(Request $request)
     {
         try {
-            $newToken = JWTAuth::refresh(JWTAuth::getToken());
+            $newToken = JWTAuth::refresh();
+            $ttl = JWTAuth::factory()->getTTL();
+            $cookie = cookie(
+                'b5_auth_token',
+                $newToken,
+                $ttl,
+                '/',
+                $this->getCookieDomainFromOrigin($request),
+                true,
+                true,
+                false,
+                'none'
+            );
 
             return response()->json([
                 'success' => true,
-                'token' => $newToken,
-                'token_type' => 'bearer',
-                'expires_in' => JWTAuth::factory()->getTTL() * 60,
-                'message' => 'Token refreshed successfully'
-            ]);
+                'expires_in' => $ttl * 60,
+                'message' => 'Token refreshed successfully',
+            ])->cookie($cookie);
         } catch (JWTException $e) {
             Log::error('JWT Refresh error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Could not refresh token.',
                 'errors' => [
-                    'general' => ['Token refresh failed. Please log in again.']
-                ]
+                    'general' => ['Token refresh failed. Please log in again.'],
+                ],
             ], Response::HTTP_UNAUTHORIZED);
         }
     }
@@ -420,28 +520,29 @@ class AuthController extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'success' => false,
                     'message' => 'User not authenticated.',
                     'errors' => [
-                        'auth' => ['User not authenticated.']
-                    ]
+                        'auth' => ['User not authenticated.'],
+                    ],
                 ], Response::HTTP_UNAUTHORIZED);
             }
 
             return response()->json([
                 'success' => true,
-                'user' => $user
+                'user' => $user,
             ]);
         } catch (Exception $e) {
             Log::error('Get user error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while fetching user data.',
                 'errors' => [
-                    'general' => ['An unexpected error occurred. Please try again.']
-                ]
+                    'general' => ['An unexpected error occurred. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -457,7 +558,7 @@ class AuthController extends Controller
             if ($user->hasVerifiedEmail()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Email уже подтвержден.'
+                    'message' => 'Email уже подтвержден.',
                 ], Response::HTTP_BAD_REQUEST);
             }
 
@@ -465,16 +566,17 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Письмо с подтверждением отправлено.'
+                'message' => 'Письмо с подтверждением отправлено.',
             ]);
         } catch (Exception $e) {
             Log::error('Send verification email error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while sending verification email.',
                 'errors' => [
-                    'general' => ['An unexpected error occurred. Please try again.']
-                ]
+                    'general' => ['An unexpected error occurred. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -494,22 +596,24 @@ class AuthController extends Controller
 
             $expectedHash = sha1($user->getEmailForVerification());
 
-            if (!hash_equals((string) $hash, $expectedHash)) {
+            if (! hash_equals((string) $hash, $expectedHash)) {
                 Log::warning('Email verification failed: hash mismatch');
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Недействительная ссылка для подтверждения.'
+                    'message' => 'Недействительная ссылка для подтверждения.',
                 ], Response::HTTP_FORBIDDEN);
             }
 
             if ($user->hasVerifiedEmail()) {
                 Log::info('Email already verified');
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Email уже был подтвержден ранее.',
                     'data' => [
-                        'user' => $user
-                    ]
+                        'user' => $user,
+                    ],
                 ]);
             }
 
@@ -524,23 +628,25 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Email успешно подтвержден.',
                 'data' => [
-                    'user' => $user->fresh()
-                ]
+                    'user' => $user->fresh(),
+                ],
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             Log::error('Email verification failed: user not found', ['id' => $id]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Пользователь не найден.'
+                'message' => 'Пользователь не найден.',
             ], Response::HTTP_NOT_FOUND);
         } catch (Exception $e) {
             Log::error('Email verification error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred during email verification.',
                 'errors' => [
-                    'general' => ['An unexpected error occurred. Please try again.']
-                ]
+                    'general' => ['An unexpected error occurred. Please try again.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -561,10 +667,11 @@ class AuthController extends Controller
         if ($referer) {
             $parsedUrl = parse_url($referer);
             if (isset($parsedUrl['scheme']) && isset($parsedUrl['host'])) {
-                $domain = $parsedUrl['scheme'] . '://' . $parsedUrl['host'];
-                if (isset($parsedUrl['port']) && !in_array($parsedUrl['port'], [80, 443])) {
-                    $domain .= ':' . $parsedUrl['port'];
+                $domain = $parsedUrl['scheme'].'://'.$parsedUrl['host'];
+                if (isset($parsedUrl['port']) && ! in_array($parsedUrl['port'], [80, 443])) {
+                    $domain .= ':'.$parsedUrl['port'];
                 }
+
                 return $domain;
             }
         }
@@ -574,56 +681,30 @@ class AuthController extends Controller
     }
 
     /**
-     * Determine user status_id based on registration domain.
-     *
-     * Domain mapping:
-     * - admin.rubonus.pro -> Куратор (curator registration)
-     * - rubonus.pro -> Агент (agent registration)
-     * - localhost:5173 -> Агент (development b5-agent)
-     * - localhost:5174 -> Куратор (development b5-admin/curator)
-     * - all others -> Не определено (default)
+     * Resolve the only status permitted for unauthenticated registration.
      */
-    private function getStatusIdByDomain(?string $registrationDomain): string
+    private function getPublicRegistrationStatusId(): string
     {
-        if (!$registrationDomain) {
-            return $this->getDefaultStatusId();
+        $agentStatus = DB::table('user_statuses')
+            ->where('slug', 'agent')
+            ->where('is_active', true)
+            ->first();
+
+        if ($agentStatus) {
+            return $agentStatus->id;
         }
 
-        // Extract host from full URL
-        $parsedUrl = parse_url($registrationDomain);
-        $host = $parsedUrl['host'] ?? $registrationDomain;
-        $port = $parsedUrl['port'] ?? null;
-        
-        // Build host:port string for localhost matching
-        $hostWithPort = $port ? "{$host}:{$port}" : $host;
+        $nonPrivilegedStatus = DB::table('user_statuses')
+            ->where('is_active', true)
+            ->whereNotIn('slug', ['admin', 'curator', 'manager', 'designer'])
+            ->orderByDesc('is_default')
+            ->first();
 
-        // Map domains to status slugs (including localhost ports for development)
-        $domainStatusMap = [
-            // Production domains
-            'admin.rubonus.pro' => 'curator',  // Curator registration
-            'rubonus.pro' => 'agent',          // Agent registration
-            // Development localhost ports
-            'localhost:5173' => 'agent',       // b5-agent
-            'localhost:5174' => 'curator',     // b5-admin (curator registration)
-        ];
-
-        // Check if domain or hostWithPort matches any known domain
-        $statusSlug = $domainStatusMap[$host] ?? $domainStatusMap[$hostWithPort] ?? null;
-
-        if ($statusSlug) {
-            // Get status_id by slug
-            $status = DB::table('user_statuses')
-                ->where('slug', $statusSlug)
-                ->where('is_active', true)
-                ->first();
-
-            if ($status) {
-                return $status->id;
-            }
+        if (! $nonPrivilegedStatus) {
+            throw new \RuntimeException('No non-privileged user status is available for public registration');
         }
 
-        // Return default status if no match found
-        return $this->getDefaultStatusId();
+        return $nonPrivilegedStatus->id;
     }
 
     /**
@@ -636,7 +717,7 @@ class AuthController extends Controller
             ->where('is_active', true)
             ->first();
 
-        if (!$defaultStatus) {
+        if (! $defaultStatus) {
             throw new \Exception('Default user status not found in database');
         }
 
@@ -653,7 +734,7 @@ class AuthController extends Controller
             ->where('is_active', true)
             ->first();
 
-        if (!$status) {
+        if (! $status) {
             // Fallback to default company status
             $status = DB::table('company_statuses')
                 ->where('is_default', true)
@@ -661,7 +742,7 @@ class AuthController extends Controller
                 ->first();
         }
 
-        if (!$status) {
+        if (! $status) {
             throw new \Exception("Company status '{$slug}' not found in database");
         }
 
@@ -678,7 +759,7 @@ class AuthController extends Controller
             ->where('is_active', true)
             ->first();
 
-        if (!$status) {
+        if (! $status) {
             // Fallback to default user status
             return $this->getDefaultStatusId();
         }
@@ -693,7 +774,7 @@ class AuthController extends Controller
     {
         try {
             Log::info('Password reset request', [
-                'email' => $request->input('email')
+                'email' => $request->input('email'),
             ]);
 
             $request->validate([
@@ -702,14 +783,15 @@ class AuthController extends Controller
 
             $user = User::where('email', $request->email)->first();
 
-            if (!$user) {
+            if (! $user) {
                 Log::warning('Password reset requested for non-existent email', [
-                    'email' => $request->email
+                    'email' => $request->email,
                 ]);
+
                 // Return success even if user doesn't exist (security best practice)
                 return response()->json([
                     'success' => true,
-                    'message' => 'Если указанный email существует, на него будет отправлена ссылка для сброса пароля.'
+                    'message' => 'Если указанный email существует, на него будет отправлена ссылка для сброса пароля.',
                 ]);
             }
 
@@ -725,36 +807,37 @@ class AuthController extends Controller
             DB::table('password_reset_tokens')->insert([
                 'email' => $request->email,
                 'token' => Hash::make($token),
-                'created_at' => now()
+                'created_at' => now(),
             ]);
 
             // Send notification
             $user->notify(new ResetPasswordNotification($token, $request->email));
 
             Log::info('Password reset email sent', [
-                'email' => $request->email
+                'email' => $request->email,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Ссылка для сброса пароля отправлена на ваш email.'
+                'message' => 'Ссылка для сброса пароля отправлена на ваш email.',
             ]);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Некорректный email.',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
             Log::error('Password reset error', [
                 'error' => $e->getMessage(),
             ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Произошла ошибка при отправке ссылки для сброса пароля.',
                 'errors' => [
-                    'general' => ['Произошла ошибка. Попробуйте позже.']
-                ]
+                    'general' => ['Произошла ошибка. Попробуйте позже.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -767,7 +850,7 @@ class AuthController extends Controller
         try {
             Log::info('Password reset attempt', [
                 'email' => $request->input('email'),
-                'has_token' => $request->has('token')
+                'has_token' => $request->has('token'),
             ]);
 
             $request->validate([
@@ -781,16 +864,17 @@ class AuthController extends Controller
                 ->where('email', $request->email)
                 ->first();
 
-            if (!$tokenRecord) {
+            if (! $tokenRecord) {
                 Log::warning('Password reset failed: token not found', [
-                    'email' => $request->email
+                    'email' => $request->email,
                 ]);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Недействительный или истекший токен.',
                     'errors' => [
-                        'token' => ['Недействительный или истекший токен.']
-                    ]
+                        'token' => ['Недействительный или истекший токен.'],
+                    ],
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
@@ -810,38 +894,40 @@ class AuthController extends Controller
                     'success' => false,
                     'message' => 'Токен истек. Запросите новую ссылку для сброса пароля.',
                     'errors' => [
-                        'token' => ['Токен истек.']
-                    ]
+                        'token' => ['Токен истек.'],
+                    ],
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             // Verify token
-            if (!Hash::check($request->token, $tokenRecord->token)) {
+            if (! Hash::check($request->token, $tokenRecord->token)) {
                 Log::warning('Password reset failed: invalid token', [
-                    'email' => $request->email
+                    'email' => $request->email,
                 ]);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Недействительный токен.',
                     'errors' => [
-                        'token' => ['Недействительный токен.']
-                    ]
+                        'token' => ['Недействительный токен.'],
+                    ],
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             // Find user
             $user = User::where('email', $request->email)->first();
 
-            if (!$user) {
+            if (! $user) {
                 Log::warning('Password reset failed: user not found', [
-                    'email' => $request->email
+                    'email' => $request->email,
                 ]);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Пользователь не найден.',
                     'errors' => [
-                        'email' => ['Пользователь не найден.']
-                    ]
+                        'email' => ['Пользователь не найден.'],
+                    ],
                 ], Response::HTTP_NOT_FOUND);
             }
 
@@ -856,29 +942,30 @@ class AuthController extends Controller
 
             Log::info('Password reset successful', [
                 'user_id' => $user->id,
-                'email' => $user->email
+                'email' => $user->email,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Пароль успешно изменен. Теперь вы можете войти с новым паролем.'
+                'message' => 'Пароль успешно изменен. Теперь вы можете войти с новым паролем.',
             ]);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Некорректные данные.',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
             Log::error('Password reset error', [
                 'error' => $e->getMessage(),
             ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Произошла ошибка при сбросе пароля.',
                 'errors' => [
-                    'general' => ['Произошла ошибка. Попробуйте позже.']
-                ]
+                    'general' => ['Произошла ошибка. Попробуйте позже.'],
+                ],
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -889,7 +976,6 @@ class AuthController extends Controller
      * Dynamically determines the appropriate cookie domain based on the request origin,
      * allowing the same backend to serve multiple frontend domains.
      *
-     * @param Request $request
      * @return string|null Cookie domain (e.g., '.bonus5.ru', '.rubonus.pro', '.bonus.band')
      */
     private function getCookieDomainFromOrigin(Request $request): ?string
@@ -898,15 +984,16 @@ class AuthController extends Controller
         $origin = $request->header('Origin');
 
         // Fallback to Referer if Origin is not present (some proxies/Nginx strip Origin)
-        if (!$origin) {
+        if (! $origin) {
             $origin = $request->header('Referer');
             if ($origin) {
                 Log::info('Using Referer header as Origin fallback', ['referer' => $origin]);
             }
         }
 
-        if (!$origin) {
+        if (! $origin) {
             Log::warning('No Origin or Referer header in request, using fallback domain');
+
             return config('session.domain', null);
         }
 
@@ -926,21 +1013,23 @@ class AuthController extends Controller
         if ($host === 'localhost' || $host === '127.0.0.1' || str_starts_with($host, 'localhost:')) {
             Log::info('Cookie domain set to null for localhost', [
                 'host' => $host,
-                'origin' => $origin
+                'origin' => $origin,
             ]);
+
             return null; // null allows cookie to work on current domain without subdomain sharing
         }
 
         // Find matching domain and return with leading dot for subdomain support
         foreach ($allowedDomains as $domain) {
             if (str_ends_with($host, $domain)) {
-                $cookieDomain = '.' . $domain;
+                $cookieDomain = '.'.$domain;
                 Log::info('Cookie domain determined', [
                     'source' => $request->header('Origin') ? 'Origin' : 'Referer',
                     'value' => $origin,
                     'host' => $host,
-                    'cookie_domain' => $cookieDomain
+                    'cookie_domain' => $cookieDomain,
                 ]);
+
                 return $cookieDomain;
             }
         }
@@ -948,7 +1037,7 @@ class AuthController extends Controller
         // Fallback: no matching domain found
         Log::warning('No matching domain found for origin/referer', [
             'origin' => $origin,
-            'host' => $host
+            'host' => $host,
         ]);
 
         return config('session.domain', null);
@@ -963,10 +1052,10 @@ class AuthController extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Пользователь не авторизован.'
+                    'message' => 'Пользователь не авторизован.',
                 ], Response::HTTP_UNAUTHORIZED);
             }
 
@@ -979,14 +1068,15 @@ class AuthController extends Controller
 
             // Check if user has admin status
             $userStatus = $user->status;
-            if (!$userStatus || $userStatus->slug !== 'admin') {
+            if (! $userStatus || $userStatus->slug !== 'admin') {
                 Log::warning('Non-admin user attempted to send commercial proposal', [
                     'user_id' => $user->id,
                     'user_status' => $userStatus?->slug,
                 ]);
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Доступ запрещён. Только администраторы могут отправлять коммерческие предложения.'
+                    'message' => 'Доступ запрещён. Только администраторы могут отправлять коммерческие предложения.',
                 ], Response::HTTP_FORBIDDEN);
             }
 
@@ -1017,25 +1107,25 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Коммерческое предложение успешно отправлено на ' . $recipientEmail
+                'message' => 'Коммерческое предложение успешно отправлено на '.$recipientEmail,
             ]);
 
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Ошибка валидации.',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
             Log::error('Failed to send commercial proposal', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Ошибка при отправке письма: ' . $e->getMessage()
+                'message' => 'Ошибка при отправке письма: '.$e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 }
-

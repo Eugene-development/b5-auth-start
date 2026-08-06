@@ -2,21 +2,20 @@
 
 namespace App\Models;
 
+use App\Notifications\CustomVerifyEmailNotification;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
-use App\Notifications\CustomVerifyEmailNotification;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\HasApiTokens;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 
-
-class User extends Authenticatable implements MustVerifyEmail, JWTSubject
+class User extends Authenticatable implements JWTSubject, MustVerifyEmail
 {
-
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
+
     /**
      * The attributes that are mass assignable.
      *
@@ -31,6 +30,8 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         'status_id',
         'company_id',
         'referrer_key', // ULID ключ реферера
+        'ban',
+        'is_active',
     ];
 
     /**
@@ -74,23 +75,21 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'ban' => 'boolean',
+            'is_active' => 'boolean',
         ];
     }
 
     /**
      * Get email verification status as boolean.
-     *
-     * @return bool
      */
     public function getEmailVerifiedAttribute(): bool
     {
-        return !is_null($this->email_verified_at);
+        return ! is_null($this->email_verified_at);
     }
 
     /**
      * Get user type from status relationship.
-     *
-     * @return string|null
      */
     public function getTypeAttribute(): ?string
     {
@@ -99,12 +98,11 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
 
     /**
      * Get primary phone number.
-     *
-     * @return string|null
      */
     public function getPhoneAttribute(): ?string
     {
         $primaryPhone = $this->phones->where('is_primary', true)->first();
+
         return $primaryPhone?->value ?? $this->phones->first()?->value;
     }
 

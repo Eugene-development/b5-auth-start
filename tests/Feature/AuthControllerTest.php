@@ -46,20 +46,27 @@ class AuthControllerTest extends TestCase
         $response->assertStatus(401);
     }
 
+    public function test_managed_user_creation_requires_authentication()
+    {
+        $response = $this->postJson('/api/admin/users', []);
+
+        $response->assertStatus(401);
+    }
+
     public function test_login_validates_required_fields()
     {
         $response = $this->postJson('/api/login', []);
 
         $response->assertStatus(422)
-                ->assertJson([
-                    'success' => false,
-                    'message' => 'The given data was invalid.'
-                ])
-                ->assertJsonStructure([
-                    'success',
-                    'message',
-                    'errors'
-                ]);
+            ->assertJson([
+                'success' => false,
+                'message' => 'The given data was invalid.',
+            ])
+            ->assertJsonStructure([
+                'success',
+                'message',
+                'errors',
+            ]);
     }
 
     public function test_register_validates_required_fields()
@@ -67,14 +74,14 @@ class AuthControllerTest extends TestCase
         $response = $this->postJson('/api/register', []);
 
         $response->assertStatus(422)
-                ->assertJson([
-                    'success' => false,
-                    'message' => 'The given data was invalid.'
-                ])
-                ->assertJsonStructure([
-                    'success',
-                    'message',
-                    'errors'
-                ]);
+            ->assertJson([
+                'success' => false,
+                'message' => 'The given data was invalid.',
+            ])
+            ->assertJsonStructure([
+                'success',
+                'message',
+                'errors',
+            ]);
     }
 }
