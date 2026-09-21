@@ -29,8 +29,8 @@ class ReferralService
     /**
      * Валидировать и получить ключ реферера.
      *
-     * @param string|null $referrerKey Ключ потенциального реферера
-     * @param int $newUserId ID нового пользователя (0 если ещё не создан)
+     * @param  string|null  $referrerKey  Ключ потенциального реферера
+     * @param  int  $newUserId  ID нового пользователя (0 если ещё не создан)
      * @return string|null Валидный ключ реферера или null
      */
     public function validateReferrer($referrerKey, int $newUserId = 0): ?string
@@ -42,10 +42,11 @@ class ReferralService
 
         // Находим реферера по key
         $referrer = User::where('key', $referrerKey)->first();
-        if (!$referrer) {
+        if (! $referrer) {
             Log::info('ReferralService: Referrer not found', [
-                'referrer_key' => $referrerKey
+                'referrer_key' => $referrerKey,
             ]);
+
             return null;
         }
 
@@ -53,18 +54,20 @@ class ReferralService
         if ($newUserId > 0 && $referrer->id === $newUserId) {
             Log::info('ReferralService: Self-referral attempt rejected', [
                 'referrer_id' => $referrer->id,
-                'new_user_id' => $newUserId
+                'new_user_id' => $newUserId,
             ]);
+
             return null;
         }
 
         // Проверяем, что реферер активен и не забанен
-        if ($referrer->ban || !$referrer->is_active) {
+        if ($referrer->ban || ! $referrer->is_active) {
             Log::info('ReferralService: Referrer is banned or inactive', [
                 'referrer_id' => $referrer->id,
                 'ban' => $referrer->ban,
-                'is_active' => $referrer->is_active
+                'is_active' => $referrer->is_active,
             ]);
+
             return null;
         }
 
@@ -72,14 +75,15 @@ class ReferralService
         if ($newUserId > 0 && $this->hasCycle($referrer->id, $newUserId)) {
             Log::warning('ReferralService: Cycle detected in referral chain', [
                 'referrer_id' => $referrer->id,
-                'new_user_id' => $newUserId
+                'new_user_id' => $newUserId,
             ]);
+
             return null;
         }
 
         Log::info('ReferralService: Referrer validated successfully', [
             'referrer_key' => $referrer->key,
-            'referrer_name' => $referrer->name
+            'referrer_name' => $referrer->name,
         ]);
 
         return $referrer->key;
@@ -91,9 +95,9 @@ class ReferralService
      * Цикл возникает, если потенциальный реферер уже является
      * рефералом нового пользователя (прямо или через цепочку).
      *
-     * @param int $referrerId ID потенциального реферера
-     * @param int $referralId ID нового пользователя (реферала)
-     * @param int $maxDepth Максимальная глубина проверки
+     * @param  int  $referrerId  ID потенциального реферера
+     * @param  int  $referralId  ID нового пользователя (реферала)
+     * @param  int  $maxDepth  Максимальная глубина проверки
      * @return bool true если цикл обнаружен
      */
     public function hasCycle(int $referrerId, int $referralId, int $maxDepth = self::MAX_CHAIN_DEPTH): bool
@@ -119,11 +123,11 @@ class ReferralService
 
             // Получаем реферера текущего пользователя
             $user = User::find($currentId);
-            if (!$user) {
+            if (! $user) {
                 break;
             }
 
-            $currentId = $user->user_id; // user_id - это ID реферера
+            $currentId = $user->referrer_key ? User::where('key', $user->referrer_key)->value('id') : null; // user_id - это ID реферера
             $depth++;
         }
 
@@ -136,13 +140,13 @@ class ReferralService
      * Реферальные бонусы начисляются только в течение 2 лет
      * после регистрации реферала.
      *
-     * @param int $referralId ID реферала
+     * @param  int  $referralId  ID реферала
      * @return bool true если срок не истёк (менее 2 лет)
      */
     public function isReferralProgramActive(int $referralId): bool
     {
         $referral = User::find($referralId);
-        if (!$referral) {
+        if (! $referral) {
             return false;
         }
 
@@ -155,24 +159,25 @@ class ReferralService
     /**
      * Получить ID реферера для пользователя.
      *
-     * @param int $userId ID пользователя
+     * @param  int  $userId  ID пользователя
      * @return int|null ID реферера или null
      */
     public function getReferrerId(int $userId): ?int
     {
         $user = User::find($userId);
-        return $user?->user_id;
+
+        return $user?->referrer_key ? User::where('key', $user->referrer_key)->value('id') : null;
     }
 
     /**
      * Получить список рефералов пользователя.
      *
-     * @param int $referrerId ID реферера
+     * @param  int  $referrerId  ID реферера
      * @return \Illuminate\Database\Eloquent\Collection
      */
     public function getReferrals(int $referrerId)
     {
-        return User::where('user_id', $referrerId)->get();
+        return User::whereNotNull('referrer_key')->where('referrer_key', User::whereKey($referrerId)->value('key'))->get();
     }
 
     /**
@@ -180,15 +185,14 @@ class ReferralService
      *
      * Активный реферал - это реферал, зарегистрированный менее 2 лет назад.
      *
-     * @param int $referrerId ID реферера
-     * @return int
+     * @param  int  $referrerId  ID реферера
      */
     public function getActiveReferralsCount(int $referrerId): int
     {
         $cutoffDate = Carbon::now()->subYears(self::REFERRAL_PROGRAM_YEARS);
 
-        return User::where('user_id', $referrerId)
-            ->where('created_at', '>=', $cutoffDate)
+        return User::whereNotNull('referrer_key')->where('referrer_key', User::whereKey($referrerId)->value('key'))
+            ->where('created_at', '>', $cutoffDate)
             ->count();
     }
 }
