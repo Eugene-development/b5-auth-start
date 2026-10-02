@@ -18,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
+use function Illuminate\Support\defer;
+
 class AuthController extends Controller
 {
     /**
@@ -478,7 +480,7 @@ class AuthController extends Controller
     public function refresh(Request $request)
     {
         try {
-            $newToken = JWTAuth::refresh();
+            $newToken = Auth::guard('api')->refresh();
             $ttl = JWTAuth::factory()->getTTL();
             $cookie = cookie(
                 'b5_auth_token',
@@ -677,7 +679,7 @@ class AuthController extends Controller
         }
 
         // Fallback to FRONTEND_URL from env
-        return env('FRONTEND_URL', 'http://localhost:5040');
+        return config('app.frontend_url');
     }
 
     /**
@@ -773,53 +775,52 @@ class AuthController extends Controller
     public function forgotPassword(Request $request)
     {
         try {
-            Log::info('Password reset request', [
-                'email' => $request->input('email'),
+            $validated = $request->validate([
+                'email' => 'required|string|email|max:255',
             ]);
 
-            $request->validate([
-                'email' => 'required|email',
-            ]);
-
-            $user = User::where('email', $request->email)->first();
-
-            if (! $user) {
-                Log::warning('Password reset requested for non-existent email', [
-                    'email' => $request->email,
-                ]);
-
-                // Return success even if user doesn't exist (security best practice)
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Если указанный email существует, на него будет отправлена ссылка для сброса пароля.',
-                ]);
-            }
-
-            // Delete old tokens for this email
-            DB::table('password_reset_tokens')
-                ->where('email', $request->email)
-                ->delete();
-
-            // Create new token
             $token = Str::random(64);
+            $tokenHash = Hash::make($token);
+            $table = config('auth.passwords.users.table', 'password_reset_tokens');
 
-            // Store token in database
-            DB::table('password_reset_tokens')->insert([
-                'email' => $request->email,
-                'token' => Hash::make($token),
-                'created_at' => now(),
-            ]);
+            $user = DB::transaction(function () use ($validated, $tokenHash, $table) {
+                // Serialize issuance and consumption using the same account lock.
+                $user = User::where('email', $validated['email'])->lockForUpdate()->first();
+                if (! $user) {
+                    return null;
+                }
 
-            // Send notification
-            $user->notify(new ResetPasswordNotification($token, $request->email));
+                $existingToken = DB::table($table)->where('email', $user->email)->first();
+                $throttle = (int) config('auth.passwords.users.throttle', 60);
+                if ($existingToken && $existingToken->created_at !== null
+                    && \Carbon\Carbon::parse($existingToken->created_at)->addSeconds($throttle)->isFuture()) {
+                    return null;
+                }
 
-            Log::info('Password reset email sent', [
-                'email' => $request->email,
-            ]);
+                DB::table($table)->updateOrInsert(
+                    ['email' => $user->email],
+                    ['token' => $tokenHash, 'created_at' => now()]
+                );
+
+                return $user;
+            });
+
+            if ($user) {
+                $origin = $request->header('Origin');
+                // SMTP latency must not reveal whether this email is registered.
+                defer(function () use ($user, $token, $tokenHash, $table, $origin) {
+                    try {
+                        $user->notify(new ResetPasswordNotification($token, $user->email, $origin));
+                    } catch (Exception $e) {
+                        DB::table($table)->where('email', $user->email)->where('token', $tokenHash)->delete();
+                        Log::error('Password reset email delivery failed', ['user_id' => $user->id, 'exception' => $e::class]);
+                    }
+                });
+            }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Ссылка для сброса пароля отправлена на ваш email.',
+                'message' => 'Если указанный email существует, на него будет отправлена ссылка для сброса пароля.',
             ]);
         } catch (ValidationException $e) {
             return response()->json([
@@ -828,9 +829,7 @@ class AuthController extends Controller
                 'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
-            Log::error('Password reset error', [
-                'error' => $e->getMessage(),
-            ]);
+            Log::error('Password reset error', ['exception' => $e::class]);
 
             return response()->json([
                 'success' => false,
@@ -848,102 +847,62 @@ class AuthController extends Controller
     public function resetPassword(Request $request)
     {
         try {
-            Log::info('Password reset attempt', [
-                'email' => $request->input('email'),
-                'has_token' => $request->has('token'),
+            $validated = $request->validate([
+                'token' => 'required|string|size:64',
+                'email' => 'required|string|email|max:255',
+                'password' => [
+                    'bail', 'required', 'string', 'min:8', 'confirmed',
+                    function (string $attribute, string $value, \Closure $fail) {
+                        if (str_contains($value, "\0")) {
+                            $fail('Пароль содержит недопустимый символ.');
+                        } elseif (config('hashing.driver', 'bcrypt') === 'bcrypt' && strlen($value) > 72) {
+                            $fail('Пароль слишком длинный. Используйте более короткий пароль.');
+                        }
+                    },
+                ],
             ]);
 
-            $request->validate([
-                'token' => 'required',
-                'email' => 'required|email',
-                'password' => 'required|string|min:8|confirmed',
-            ]);
+            $table = config('auth.passwords.users.table', 'password_reset_tokens');
+            $result = DB::transaction(function () use ($validated, $table) {
+                $user = User::where('email', $validated['email'])->lockForUpdate()->first();
+                $tokenRecord = DB::table($table)->where('email', $validated['email'])->lockForUpdate()->first();
+                if (! $user || ! $tokenRecord) {
+                    return 'invalid';
+                }
 
-            // Find token record
-            $tokenRecord = DB::table('password_reset_tokens')
-                ->where('email', $request->email)
-                ->first();
+                $expire = (int) config('auth.passwords.users.expire', 60);
+                if ($tokenRecord->created_at === null
+                    || \Carbon\Carbon::parse($tokenRecord->created_at)->addMinutes($expire)->lessThanOrEqualTo(now())) {
+                    DB::table($table)->where('email', $validated['email'])->delete();
 
-            if (! $tokenRecord) {
-                Log::warning('Password reset failed: token not found', [
-                    'email' => $request->email,
-                ]);
+                    return 'expired';
+                }
+
+                if (! Hash::check($validated['token'], $tokenRecord->token)) {
+                    return 'invalid';
+                }
+
+                $user->forceFill([
+                    'password' => Hash::make($validated['password']),
+                    'remember_token' => Str::random(60),
+                ])->save();
+
+                DB::table($table)->where('email', $validated['email'])->delete();
+
+                return 'success';
+            });
+
+            if ($result !== 'success') {
+                $message = $result === 'expired'
+                    ? 'Токен истек. Запросите новую ссылку для сброса пароля.'
+                    : 'Недействительный или истекший токен.';
 
                 return response()->json([
                     'success' => false,
-                    'message' => 'Недействительный или истекший токен.',
-                    'errors' => [
-                        'token' => ['Недействительный или истекший токен.'],
-                    ],
+                    'message' => $message,
+                    'errors' => ['token' => [$message]],
                 ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
-
-            // Check if token is expired (60 minutes)
-            $createdAt = \Carbon\Carbon::parse($tokenRecord->created_at);
-            if ($createdAt->addMinutes(60)->isPast()) {
-                Log::warning('Password reset failed: token expired', [
-                    'email' => $request->email,
-                ]);
-
-                // Delete expired token
-                DB::table('password_reset_tokens')
-                    ->where('email', $request->email)
-                    ->delete();
-
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Токен истек. Запросите новую ссылку для сброса пароля.',
-                    'errors' => [
-                        'token' => ['Токен истек.'],
-                    ],
-                ], Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
-
-            // Verify token
-            if (! Hash::check($request->token, $tokenRecord->token)) {
-                Log::warning('Password reset failed: invalid token', [
-                    'email' => $request->email,
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Недействительный токен.',
-                    'errors' => [
-                        'token' => ['Недействительный токен.'],
-                    ],
-                ], Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
-
-            // Find user
-            $user = User::where('email', $request->email)->first();
-
-            if (! $user) {
-                Log::warning('Password reset failed: user not found', [
-                    'email' => $request->email,
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Пользователь не найден.',
-                    'errors' => [
-                        'email' => ['Пользователь не найден.'],
-                    ],
-                ], Response::HTTP_NOT_FOUND);
-            }
-
-            // Update password
-            $user->password = Hash::make($request->password);
-            $user->save();
-
-            // Delete token after successful reset
-            DB::table('password_reset_tokens')
-                ->where('email', $request->email)
-                ->delete();
-
-            Log::info('Password reset successful', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-            ]);
 
             return response()->json([
                 'success' => true,
@@ -956,9 +915,7 @@ class AuthController extends Controller
                 'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Exception $e) {
-            Log::error('Password reset error', [
-                'error' => $e->getMessage(),
-            ]);
+            Log::error('Password reset error', ['exception' => $e::class]);
 
             return response()->json([
                 'success' => false,

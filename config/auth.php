@@ -110,6 +110,30 @@ return [
         ],
     ],
 
+    'password_reset' => [
+        // Only origins which host the password reset form may receive a token.
+        'allowed_origins' => array_values(array_filter([
+            env('FRONTEND_URL', 'http://localhost:5040'),
+            'https://bonus5.ru',
+            'https://www.bonus5.ru',
+            'https://bonus.band',
+            'https://www.bonus.band',
+            'https://admin.bonus.band',
+            'https://rubonus.info',
+            'https://rubonus.pro',
+            'https://www.rubonus.pro',
+            'https://admin.rubonus.pro',
+            ...array_map('trim', explode(',', env('PASSWORD_RESET_ALLOWED_ORIGINS', ''))),
+            ...(in_array(env('APP_ENV', 'production'), ['local', 'testing'], true) ? [
+                'http://localhost:5040',
+                'http://localhost:5173',
+                'http://127.0.0.1:5173',
+                'http://localhost:5137',
+                'http://127.0.0.1:5137',
+            ] : []),
+        ])),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Password Confirmation Timeout
