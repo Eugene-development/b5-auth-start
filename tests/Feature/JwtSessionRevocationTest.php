@@ -34,6 +34,36 @@ final class JwtSessionRevocationTest extends TestCase
         $this->getUser($token)->assertOk()->assertJsonPath('user.id', $user->id);
     }
 
+    public function test_current_session_can_access_user_with_only_the_http_only_cookie(): void
+    {
+        $user = User::factory()->create(['remember_token' => Str::random(60)]);
+        $token = JWTAuth::fromUser($user);
+        $this->clearJwtState();
+
+        $this->call('GET', '/api/user', [], ['b5_auth_token' => $token], [], [
+            'HTTP_ACCEPT' => 'application/json',
+        ])->assertOk()->assertJsonPath('user.id', $user->id);
+    }
+
+    public function test_cookie_only_logout_revokes_the_token_for_later_bearer_requests(): void
+    {
+        $user = User::factory()->create(['remember_token' => Str::random(60)]);
+        $token = JWTAuth::fromUser($user);
+        $this->clearJwtState();
+
+        $response = $this->call('POST', '/api/logout', [], ['b5_auth_token' => $token], [], [
+            'HTTP_ACCEPT' => 'application/json',
+        ]);
+
+        $response->assertOk()->assertJsonPath('success', true);
+        $cookies = $response->headers->getCookies();
+        $this->assertCount(1, $cookies);
+        $this->assertSame('b5_auth_token', $cookies[0]->getName());
+        $this->assertLessThanOrEqual(time(), $cookies[0]->getExpiresTime());
+
+        $this->getUser($token)->assertUnauthorized();
+    }
+
     public function test_rotating_the_session_version_rejects_access_and_refresh(): void
     {
         $user = User::factory()->create(['remember_token' => Str::random(60)]);

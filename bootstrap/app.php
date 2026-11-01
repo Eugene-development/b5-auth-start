@@ -35,6 +35,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'auth.cookie' => \App\Http\Middleware\AuthenticateFromCookie::class,
             'active.user' => \App\Http\Middleware\EnsureActiveUser::class,
         ]);
+
+        // Populate the bearer header before Laravel sorts in the auth middleware.
+        $middleware->prependToPriorityList(
+            \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class,
+            \App\Http\Middleware\AuthenticateFromCookie::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

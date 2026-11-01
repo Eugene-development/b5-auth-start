@@ -46,13 +46,11 @@ class AuthController extends Controller
             $credentials = $request->only('email', 'password');
             $remember = $request->boolean('remember', false);
 
-            // Set custom TTL if "remember me" is checked (30 days = 43200 minutes)
-            if ($remember) {
-                JWTAuth::factory()->setTTL(43200); // 30 days in minutes
-            }
+            // Select the lifetime for every login, including reused application instances.
+            JWTAuth::factory()->setTTL($remember ? 43200 : config('jwt.ttl'));
 
             // Attempt to generate JWT token
-            if (! $token = JWTAuth::attempt($credentials)) {
+            if (! $token = JWTAuth::claims(['remember' => $remember])->attempt($credentials)) {
                 Log::warning('JWT Login failed - invalid credentials', [
                     'email' => $request->input('email'),
                 ]);
@@ -99,7 +97,7 @@ class AuthController extends Controller
             $cookie = cookie(
                 'b5_auth_token',           // Cookie name
                 $token,                     // JWT token
-                $ttl,                       // Expiration time (minutes)
+                $remember ? $ttl : 0,       // Persist only when "remember me" is checked
                 '/',                        // Path
                 $cookieDomain,              // Domain (dynamic based on origin)
                 true,                       // Secure (required for SameSite=None)
@@ -174,11 +172,21 @@ class AuthController extends Controller
                 'region' => 'nullable|string|max:255',
                 'phone' => 'nullable|string|regex:/^[\+]?[0-9\s\-\(\)]{10,20}$/',
                 'ref' => 'nullable|string|max:255',
+                'campaign_token' => ['nullable', 'string', 'regex:/^[a-f0-9]{48}$/'],
             ]);
 
             // Validate referrer if provided
             $referrerKey = null;
-            if ($request->filled('ref')) {
+            if ($request->filled('campaign_token')) {
+                $campaignKey = app(\App\Services\GrowthRegistrationService::class)->referrerKey($request->campaign_token);
+                $referrerKey = app(\App\Services\ReferralService::class)->validateReferrer($campaignKey, 0);
+                if ($referrerKey === null) {
+                    throw ValidationException::withMessages(['campaign_token' => 'Приглашение недоступно.']);
+                }
+                if ($request->filled('ref') && $request->ref !== $referrerKey) {
+                    throw ValidationException::withMessages(['ref' => 'Источник приглашения не совпадает с реферером.']);
+                }
+            } elseif ($request->filled('ref')) {
                 $referralService = app(\App\Services\ReferralService::class);
                 $referrerKey = $referralService->validateReferrer($request->ref, 0);
 
@@ -229,6 +237,10 @@ class AuthController extends Controller
                 ]);
 
                 // Add region if provided
+                if ($request->filled('campaign_token')) {
+                    app(\App\Services\GrowthRegistrationService::class)->attributeUser($request->campaign_token, $user);
+                }
+
                 if ($request->filled('region')) {
                     $user->region = $request->region;
                     $user->save();
@@ -418,8 +430,8 @@ class AuthController extends Controller
             $user = Auth::user();
             Log::info('JWT Logout initiated', ['user_id' => $user?->id, 'email' => $user?->email]);
 
-            // Invalidate the token
-            JWTAuth::invalidate();
+            // The API guard owns the token parsed during authentication.
+            Auth::guard('api')->logout();
 
             Log::info('JWT Logout completed successfully');
 
@@ -480,12 +492,16 @@ class AuthController extends Controller
     public function refresh(Request $request)
     {
         try {
-            $newToken = Auth::guard('api')->refresh();
+            $guard = Auth::guard('api');
+            // Only the signed token can authorize persistent login; legacy tokens stay session-only.
+            $remember = $guard->getPayload()->get('remember') === true;
+            JWTAuth::factory()->setTTL($remember ? 43200 : config('jwt.ttl'));
+            $newToken = $guard->refresh();
             $ttl = JWTAuth::factory()->getTTL();
             $cookie = cookie(
                 'b5_auth_token',
                 $newToken,
-                $ttl,
+                $remember ? $ttl : 0,
                 '/',
                 $this->getCookieDomainFromOrigin($request),
                 true,
